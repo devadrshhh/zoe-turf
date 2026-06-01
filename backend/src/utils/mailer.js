@@ -1,6 +1,6 @@
 const nodemailer = require('nodemailer');
 
-// Build the mail transporter if environment values are available
+// Build the mail SMTP transporter if environment values are available
 const getTransporter = () => {
   const service = process.env.EMAIL_SERVICE || 'gmail';
   const user = process.env.EMAIL_USER;
@@ -22,29 +22,20 @@ const getTransporter = () => {
 };
 
 /**
- * Sends a high-fidelity booking invoice receipt directly to the customer's email ID
+ * Sends a high-fidelity booking invoice receipt directly to the customer's email ID.
+ * Supports standard Nodemailer SMTP and fallback to Brevo HTTPS REST API to bypass cloud port blocks.
  * @param {Object} booking - The Mongoose booking record document
  * @param {String} turfName - The human-readable name of the reserved sports turf
  */
 const sendReceiptEmail = async (booking, turfName) => {
   try {
-    const transporter = getTransporter();
-    if (!transporter) {
-      console.log(`ℹ️ Booking confirmation logged. Email receipt bypassed (SMTP not configured) for: ${booking.customerEmail}`);
-      return false;
-    }
-
     if (!booking.customerEmail) {
       console.warn(`⚠️ Mailing Warning: Missing customerEmail on booking ${booking.bookingId}. Skipping email send.`);
       return false;
     }
 
-    // Email Options with beautiful responsive design & inline QR attachments
-    const mailOptions = {
-      from: `"Turf Hub" <${process.env.EMAIL_USER}>`,
-      to: booking.customerEmail,
-      subject: `⚡ Booking Confirmed! Ticket ID: ${booking.bookingId}`,
-      html: `
+    // High fidelity responsive HTML ticket invoice
+    const htmlText = `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);">
           <!-- Top Accent Header Gradient -->
           <div style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); padding: 24px; text-align: center; color: #ffffff;">
@@ -110,18 +101,63 @@ const sendReceiptEmail = async (booking, turfName) => {
             <p style="margin: 4px 0 0 0;">Please keep this receipt handy. For rescheduling or queries, please contact reception.</p>
           </div>
         </div>
-      `,
+      `;
+
+    // A. HTTP REST API (Brevo) - Primary Production Option to completely bypass SMTP cloud firewalls
+    if (process.env.BREVO_API_KEY) {
+      console.log('⚡ Detected BREVO_API_KEY. Sending receipt email via Brevo HTTP REST API (Port 443)...');
+      const senderEmail = process.env.EMAIL_USER || 'learn.microx@gmail.com';
+      const inlineHtmlContent = htmlText.replace('src="cid:receipt-qr"', `src="${booking.qrCodeData}"`);
+
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': process.env.BREVO_API_KEY,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: 'Turf Hub', email: senderEmail },
+          to: [{ email: booking.customerEmail, name: booking.customerName }],
+          subject: `⚡ Booking Confirmed! Ticket ID: ${booking.bookingId}`,
+          htmlContent: inlineHtmlContent
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`🚀 Automated receipt email dispatched successfully via Brevo HTTP REST API. Message ID: ${data.messageId || 'N/A'}`);
+        return true;
+      } else {
+        const errText = await response.text();
+        console.error('❌ Brevo HTTP API dispatch failed:', errText);
+        // Fail over to SMTP fallback
+      }
+    }
+
+    // B. Standard Nodemailer SMTP Transporter - Secondary Fallback (Local environment or unblocked servers)
+    const transporter = getTransporter();
+    if (!transporter) {
+      console.log(`ℹ️ Booking confirmation logged. Email receipt bypassed (SMTP/API not configured) for: ${booking.customerEmail}`);
+      return false;
+    }
+
+    const mailOptions = {
+      from: `"Turf Hub" <${process.env.EMAIL_USER}>`,
+      to: booking.customerEmail,
+      subject: `⚡ Booking Confirmed! Ticket ID: ${booking.bookingId}`,
+      html: htmlText,
       attachments: booking.qrCodeData ? [
         {
           filename: `QR_${booking.bookingId}.png`,
-          path: booking.qrCodeData, // Attaches the base64 data URI cleanly
-          cid: 'receipt-qr', // Inline content-id
+          path: booking.qrCodeData, // Attaches base64 data URI cleanly
+          cid: 'receipt-qr', // Inline content-id reference
         }
       ] : []
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`🚀 Automated receipt email dispatched successfully to ${booking.customerEmail}. Message ID: ${info.messageId}`);
+    console.log(`🚀 Automated receipt email dispatched successfully via SMTP to ${booking.customerEmail}. Message ID: ${info.messageId}`);
     return true;
   } catch (err) {
     console.error(`⚠️ Mailing Error: Failed to send automated email receipt to ${booking.customerEmail}. Detail:`, err.message);
