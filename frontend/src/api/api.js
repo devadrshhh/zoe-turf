@@ -6,12 +6,12 @@ import axios from 'axios';
  * Retrieves the API gateway base URL from Vite environment variables (VITE_API_URL).
  * If undefined, falls back cleanly to local development port URL for zero-friction developer onboarding.
  */
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'baseURL: import.meta.env.VITE_API_URL';
 
 if (!import.meta.env.VITE_API_URL) {
   console.warn(
     "⚠️ [Vite Environment Warning] 'VITE_API_URL' is not defined. " +
-    "Falling back to local development URL: http://localhost:5000/api. " +
+    "Falling back to local development URL: baseURL: import.meta.env.VITE_API_URL. " +
     "For production deployments (e.g. Vercel & Render), configure 'VITE_API_URL' in your environment settings."
   );
 }
