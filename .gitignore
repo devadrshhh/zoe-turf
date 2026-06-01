@@ -2,35 +2,15 @@ node_modules
 .env
 dist
 build
-coverage
 
-# Logs
+backend/node_modules
+frontend/node_modules
 
-logs
-*.log
-npm-debug.log*
-
-# OS files
-
-.DS_Store
-Thumbs.db
-
-# VS Code
-
-.vscode/
-
-# Environment files
-
-*.env
-
-# Frontend build files
+backend/.env
+frontend/.env
 
 frontend/dist
 
-# Backend dependencies
-
-backend/node_modules
-
-# Frontend dependencies
-
-frontend/node_modules
+*.log
+.vscode
+.DS_Store
