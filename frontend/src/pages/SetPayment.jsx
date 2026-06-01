@@ -15,7 +15,7 @@ const SetPayment = () => {
     setFetching(true);
     setErrorMsg('');
     try {
-      const response = await axiosInstance.get('`${import.meta.env.VITE_API_URL}/api/turfs`');
+      const response = await axiosInstance.get('/turfs');
       if (response.data.success && response.data.turfs.length > 0) {
         // Since price is global, we can display the first turf's price as current reference
         setCurrentPrice(response.data.turfs[0].pricePerHour);
@@ -48,7 +48,7 @@ const SetPayment = () => {
     setSuccessMsg('');
 
     try {
-      const response = await axiosInstance.put('`${import.meta.env.VITE_API_URL}/api/turfs`/update-price-all', {
+      const response = await axiosInstance.put('/turfs/update-price-all', {
         amount: Number(amount),
       });
 

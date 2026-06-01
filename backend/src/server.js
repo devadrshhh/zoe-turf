@@ -61,7 +61,7 @@ app.use('/api/', limiter);
 
 // Mount Routes
 app.use('/api/admin', adminRoutes);
-app.use('/api`${import.meta.env.VITE_API_URL}/api/turfs`', turfRoutes);
+app.use('/api/turfs', turfRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/payments', paymentRoutes);

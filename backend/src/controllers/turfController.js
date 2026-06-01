@@ -1,7 +1,7 @@
 const Turf = require('../models/Turf');
 
 // @desc    Get All Turfs (public/admin list)
-// @route   GET /api`${import.meta.env.VITE_API_URL}/api/turfs`
+// @route   GET /api/turfs
 // @access  Public
 const getTurfs = async (req, res, next) => {
   try {
@@ -17,7 +17,7 @@ const getTurfs = async (req, res, next) => {
 };
 
 // @desc    Get All Turfs for Admin Panel (including inactive)
-// @route   GET /api`${import.meta.env.VITE_API_URL}/api/turfs`/admin
+// @route   GET /api/turfs/admin
 // @access  Private
 const getAdminTurfs = async (req, res, next) => {
   try {
@@ -33,7 +33,7 @@ const getAdminTurfs = async (req, res, next) => {
 };
 
 // @desc    Get Single Turf Details
-// @route   GET /api`${import.meta.env.VITE_API_URL}/api/turfs`/:id
+// @route   GET /api/turfs/:id
 // @access  Public
 const getTurfById = async (req, res, next) => {
   try {
@@ -54,7 +54,7 @@ const getTurfById = async (req, res, next) => {
 };
 
 // @desc    Create a Turf
-// @route   POST /api`${import.meta.env.VITE_API_URL}/api/turfs`
+// @route   POST /api/turfs
 // @access  Private (Admins)
 const createTurf = async (req, res, next) => {
   try {
@@ -86,7 +86,7 @@ const createTurf = async (req, res, next) => {
 };
 
 // @desc    Update a Turf
-// @route   PUT /api`${import.meta.env.VITE_API_URL}/api/turfs`/:id
+// @route   PUT /api/turfs/:id
 // @access  Private (Admins)
 const updateTurf = async (req, res, next) => {
   try {
@@ -122,7 +122,7 @@ const updateTurf = async (req, res, next) => {
 };
 
 // @desc    Delete a Turf
-// @route   DELETE /api`${import.meta.env.VITE_API_URL}/api/turfs`/:id
+// @route   DELETE /api/turfs/:id
 // @access  Private (Admins)
 const deleteTurf = async (req, res, next) => {
   try {
@@ -146,7 +146,7 @@ const deleteTurf = async (req, res, next) => {
 };
 
 // @desc    Update price for all turfs/slots
-// @route   PUT /api`${import.meta.env.VITE_API_URL}/api/turfs`/update-price-all
+// @route   PUT /api/turfs/update-price-all
 // @access  Private (Admins)
 const updateAllTurfPrices = async (req, res, next) => {
   try {
