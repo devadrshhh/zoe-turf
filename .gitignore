@@ -1,0 +1,36 @@
+node_modules
+.env
+dist
+build
+coverage
+
+# Logs
+
+logs
+*.log
+npm-debug.log*
+
+# OS files
+
+.DS_Store
+Thumbs.db
+
+# VS Code
+
+.vscode/
+
+# Environment files
+
+*.env
+
+# Frontend build files
+
+frontend/dist
+
+# Backend dependencies
+
+backend/node_modules
+
+# Frontend dependencies
+
+frontend/node_modules
