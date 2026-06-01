@@ -107,7 +107,7 @@ const Bookings = () => {
 
   const fetchTurfs = async () => {
     try {
-      const response = await axiosInstance.get('/turfs');
+      const response = await axiosInstance.get('`${import.meta.env.VITE_API_URL}/api/turfs`');
       if (response.data.success) {
         setTurfs(response.data.turfs);
       }
