@@ -8,8 +8,13 @@ import axios from 'axios';
  * Falls back to localhost for local development.
  */
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const getBaseUrl = () => {
+  const url = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  // Ensure the base URL always ends with '/api' for backend route mapping
+  return url.endsWith('/api') ? url : `${url.replace(/\/$/, '')}/api`;
+};
+
+export const API_BASE_URL = getBaseUrl();
 
 /**
  * ============================================
