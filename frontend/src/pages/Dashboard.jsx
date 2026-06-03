@@ -374,6 +374,111 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
     startScanner(cameraId);
   };
 
+  const handleTouchFocus = async (e) => {
+    try {
+      const videoElement = document.querySelector('#qr-reader video');
+      if (!videoElement || !videoElement.srcObject) return;
+
+      const stream = videoElement.srcObject;
+      const tracks = stream.getVideoTracks();
+      if (tracks.length === 0) return;
+
+      const track = tracks[0];
+      const capabilities = typeof track.getCapabilities === 'function' ? track.getCapabilities() : {};
+
+      // Get click/touch relative coordinates to video viewport (0.0 to 1.0)
+      const rect = videoElement.getBoundingClientRect();
+      const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      
+      if (!clientX || !clientY) return;
+
+      // Coordinates mapped to 0.0 - 1.0 range
+      const x = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+      const y = Math.min(Math.max((clientY - rect.top) / rect.height, 0), 1);
+
+      // Create focus ripple element dynamically inside the viewport parent
+      const viewportElement = rect.width ? videoElement.parentElement : null;
+      if (viewportElement) {
+        // Calculate coords relative to viewport parent container
+        const parentRect = viewportElement.getBoundingClientRect();
+        const rippleX = clientX - parentRect.left;
+        const rippleY = clientY - parentRect.top;
+
+        const ripple = document.createElement('div');
+        ripple.className = 'focus-ripple';
+        ripple.style.left = `${rippleX}px`;
+        ripple.style.top = `${rippleY}px`;
+        viewportElement.appendChild(ripple);
+
+        // Clean up ripple element after animation completes (600ms)
+        setTimeout(() => {
+          ripple.remove();
+        }, 600);
+      }
+
+      // Check camera focus capabilities
+      const focusModes = capabilities.focusMode || [];
+      const supportsSingleShot = focusModes.includes('single-shot');
+      const supportsManual = focusModes.includes('manual');
+      const supportsPointsOfInterest = capabilities.pointsOfInterest;
+
+      const advancedConstraints = {};
+
+      if (supportsPointsOfInterest) {
+        advancedConstraints.pointsOfInterest = [{ x, y }];
+      }
+
+      if (supportsSingleShot) {
+        advancedConstraints.focusMode = 'single-shot';
+      } else if (supportsManual) {
+        advancedConstraints.focusMode = 'manual';
+        // Set focusDistance if manual focus is supported
+        if (capabilities.focusDistance) {
+          advancedConstraints.focusDistance = capabilities.focusDistance.min + (capabilities.focusDistance.max - capabilities.focusDistance.min) * 0.2;
+        }
+      }
+
+      // Log ImageCapture API capabilities if present
+      if (window.ImageCapture) {
+        console.log('📷 ImageCapture API: manual focus trigger supported');
+      }
+
+      if (Object.keys(advancedConstraints).length > 0) {
+        console.log('🎯 Applying tap focus constraints:', advancedConstraints);
+        await track.applyConstraints({ advanced: [advancedConstraints] });
+
+        // Lock focus briefly (e.g. 1.5 seconds) then restore focusMode: "continuous"
+        setTimeout(async () => {
+          try {
+            const currentTracks = videoElement?.srcObject?.getVideoTracks();
+            if (currentTracks && currentTracks.length > 0) {
+              const currentTrack = currentTracks[0];
+              const curCapabilities = typeof currentTrack.getCapabilities === 'function' ? currentTrack.getCapabilities() : {};
+              const curFocusModes = curCapabilities.focusMode || [];
+              
+              if (curFocusModes.includes('continuous')) {
+                await currentTrack.applyConstraints({
+                  advanced: [{ focusMode: 'continuous' }]
+                });
+                console.log('🔄 Restored focusMode: continuous');
+              }
+            }
+          } catch (restoreErr) {
+            console.warn('Failed to restore continuous focus mode:', restoreErr);
+          }
+        }, 1500);
+      } else {
+        // Fallback: Toggle focusMode continuous to force camera lens trigger
+        if (focusModes.includes('continuous')) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+        }
+      }
+    } catch (err) {
+      console.warn('Tap-to-focus execution error:', err);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4 items-center w-full flex-1 justify-center relative">
       {scanError && (
@@ -384,7 +489,10 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
       )}
 
       {/* Viewport Frame */}
-      <div className="relative w-full flex-1 max-h-[360px] sm:max-h-[300px] flex items-center justify-center bg-slate-950 overflow-hidden rounded-xl border border-slate-800">
+      <div 
+        onClick={handleTouchFocus}
+        className="relative w-full flex-1 max-h-[360px] sm:max-h-[300px] flex items-center justify-center bg-slate-950 overflow-hidden rounded-xl border border-slate-800 cursor-pointer"
+      >
         
         {/* html5-qrcode element */}
         <div id="qr-reader" className="w-full h-full object-cover [&>video]:object-cover [&>video]:w-full [&>video]:h-full [&>div]:hidden"></div>
