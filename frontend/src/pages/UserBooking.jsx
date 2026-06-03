@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axiosInstance from '../utils/axiosInstance';
 import {
   Calendar,
@@ -8,17 +8,16 @@ import {
   Mail,
   Ticket,
   Check,
-  QrCode,
   MapPin,
-  Sparkles,
-  Info,
-  CreditCard,
-  X,
   Dribbble,
-  ChevronRight,
-  Printer,
+  X,
   Download,
-  AlertCircle
+  AlertCircle,
+  CreditCard,
+  Info,
+  ChevronRight,
+  TrendingUp,
+  DollarSign
 } from 'lucide-react';
 
 const isSlotTimeValid = (slotTime, bookingDate) => {
@@ -54,7 +53,7 @@ const UserBooking = () => {
   const [availableSlots, setAvailableSlots] = useState([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState('');
-  const [currentStep, setCurrentStep] = useState(1); // 1 = Pick Turf, 2 = Date & Slots, 3 = Summary
+  const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
 
   // Player Contact form states
   const [customerName, setCustomerName] = useState('');
@@ -85,14 +84,36 @@ const UserBooking = () => {
     setTimeout(() => setToastVisible(false), 3500);
   };
 
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   useEffect(() => {
+    // 1. Preload Razorpay script on mount for immediate opening
+    loadRazorpayScript().then((success) => {
+      if (success) {
+        console.log('💳 Razorpay checkout script preloaded.');
+      }
+    });
+
+    // 2. Fetch Turfs
     const loadTurfs = async () => {
       try {
         const response = await axiosInstance.get('/turfs');
         if (response.data.success) {
           setTurfs(response.data.turfs);
           if (response.data.turfs.length > 0) {
-            setSelectedTurf(response.data.turfs[0]); // Default to first turf for high fidelity UX
+            setSelectedTurf(response.data.turfs[0]); // Default to first turf for smooth UX
           }
         }
       } catch (err) {
@@ -104,7 +125,15 @@ const UserBooking = () => {
     };
     loadTurfs();
 
-    // Default booking date to Today using local timezone calculations
+    // 3. Auto-fill contact details from localStorage
+    const cachedName = localStorage.getItem('turf_customer_name');
+    const cachedEmail = localStorage.getItem('turf_customer_email');
+    const cachedPhone = localStorage.getItem('turf_customer_phone');
+    if (cachedName) setCustomerName(cachedName);
+    if (cachedEmail) setCustomerEmail(cachedEmail);
+    if (cachedPhone) setCustomerPhone(cachedPhone);
+
+    // Default booking date to Today
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     setBookingDate(todayStr);
@@ -167,26 +196,17 @@ const UserBooking = () => {
     }
   };
 
-  const loadRazorpayScript = () => {
-    return new Promise((resolve) => {
-      if (window.Razorpay) {
-        resolve(true);
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  };
-
   const handleBookingSubmit = async (e) => {
     e.preventDefault();
     if (!selectedSlot) {
       triggerToast('Please pick a timing slot', 'error');
       return;
     }
+
+    // Save customer details to localStorage for zero-typing auto-fill next time
+    localStorage.setItem('turf_customer_name', customerName);
+    localStorage.setItem('turf_customer_email', customerEmail);
+    localStorage.setItem('turf_customer_phone', customerPhone);
 
     setSubmitting(true);
     try {
@@ -207,6 +227,7 @@ const UserBooking = () => {
         
         if (paymentMethod === 'Cash') {
           setActiveBooking(booking);
+          setCheckoutModalOpen(false);
           setReceiptModalOpen(true);
           triggerToast('Slot booked! Present QR at reception.');
           resetForm();
@@ -216,12 +237,13 @@ const UserBooking = () => {
           if (params.order_id.startsWith('order_sandbox_')) {
             // Simulated local checkout
             setActiveBooking(booking);
+            setCheckoutModalOpen(false);
             setMockRazorpayOpen(true);
             setSubmitting(false);
           } else {
             const scriptLoaded = await loadRazorpayScript();
             if (!scriptLoaded) {
-              triggerToast('Failed to load Razorpay payment gateway. Please check your connection.', 'error');
+              triggerToast('Failed to load Razorpay. Check your connection.', 'error');
               return;
             }
 
@@ -252,13 +274,14 @@ const UserBooking = () => {
 
                   if (verifyResponse.data.success) {
                     setActiveBooking(verifyResponse.data.booking);
+                    setCheckoutModalOpen(false);
                     setReceiptModalOpen(true);
                     triggerToast('Transaction completed successfully!');
                     resetForm();
                   }
                 } catch (err) {
                   console.error(err);
-                  triggerToast('Razorpay payment verification rejected.', 'error');
+                  triggerToast('Payment verification rejected.', 'error');
                 } finally {
                   setSubmitting(false);
                 }
@@ -310,10 +333,12 @@ const UserBooking = () => {
         setSubmitting(false);
       }
     } else {
-      triggerToast('Sandbox payment simulation cancelled or failed.', 'error');
+      triggerToast('Sandbox payment simulation cancelled.', 'error');
       setSubmitting(false);
     }
-  };  const downloadReceiptAsPNG = () => {
+  };
+
+  const downloadReceiptAsPNG = () => {
     if (!activeBooking) return;
     
     const canvas = document.createElement('canvas');
@@ -321,23 +346,19 @@ const UserBooking = () => {
     canvas.height = 650;
     const ctx = canvas.getContext('2d');
     
-    // Background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    // Top border stripe (sky-blue/blue gradient)
     const grad = ctx.createLinearGradient(0, 0, canvas.width, 0);
     grad.addColorStop(0, '#3b82f6');
     grad.addColorStop(1, '#2563eb');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, canvas.width, 12);
     
-    // Inner border outline
     ctx.strokeStyle = '#e2e8f0';
     ctx.lineWidth = 2;
     ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
     
-    // Header
     ctx.textAlign = 'center';
     ctx.fillStyle = '#0f172a';
     ctx.font = 'bold 22px sans-serif';
@@ -347,7 +368,6 @@ const UserBooking = () => {
     ctx.font = '500 12px sans-serif';
     ctx.fillText('Timings successfully reserved at Turf Hub', canvas.width / 2, 70);
     
-    // Draw decorative dotted line
     ctx.strokeStyle = '#cbd5e1';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 4]);
@@ -355,16 +375,13 @@ const UserBooking = () => {
     ctx.moveTo(35, 88);
     ctx.lineTo(canvas.width - 35, 88);
     ctx.stroke();
-    ctx.setLineDash([]); // Reset dash
+    ctx.setLineDash([]); 
 
-    // Load QR base64 image and draw once ready
     const qrImg = new Image();
     qrImg.src = activeBooking.qrCodeData;
     qrImg.onload = () => {
-      // Draw centered QR Code
       ctx.drawImage(qrImg, canvas.width / 2 - 80, 105, 160, 160);
       
-      // Draw details table
       let startY = 295;
       const rowHeight = 28;
       
@@ -378,12 +395,10 @@ const UserBooking = () => {
         ctx.fillStyle = isLast ? '#3b82f6' : '#0f172a';
         ctx.font = isLast ? 'extrabold 15px sans-serif' : 'bold 12px sans-serif';
         
-        // Handle long values (e.g. long email) gracefully by scaling text
         if (!isLast && val.length > 25) {
           ctx.font = 'bold 10px sans-serif';
         }
         ctx.fillText(val, canvas.width - 40, startY);
-        
         startY += rowHeight;
       };
       
@@ -395,7 +410,6 @@ const UserBooking = () => {
       drawRow('Turf Venue:', selectedTurf ? selectedTurf.name : 'Main Turf Arena');
       drawRow('Payment Method:', `${activeBooking.paymentMethod} (${activeBooking.paymentStatus})`);
       
-      // Divider
       ctx.strokeStyle = '#cbd5e1';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -406,7 +420,6 @@ const UserBooking = () => {
       startY += 8;
       drawRow('Total Amount Paid:', `₹${activeBooking.finalAmount}`, true);
       
-      // Receipt generation timestamp
       ctx.textAlign = 'center';
       ctx.fillStyle = '#94a3b8';
       ctx.font = '500 9px sans-serif';
@@ -416,7 +429,6 @@ const UserBooking = () => {
       ctx.font = 'italic 10px sans-serif';
       ctx.fillText('Thank you for booking with Turf Hub! Present QR at reception.', canvas.width / 2, canvas.height - 22);
       
-      // Programmatically trigger download
       const link = document.createElement('a');
       link.download = `Receipt_${activeBooking.bookingId}.png`;
       link.href = canvas.toDataURL('image/png');
@@ -436,9 +448,7 @@ const UserBooking = () => {
 
   const resetForm = () => {
     setSelectedSlot('');
-    setCustomerName('');
-    setCustomerEmail('');
-    setCustomerPhone('');
+    setCheckoutModalOpen(false);
     setCouponCode('');
     setCouponDiscount(0);
     setCouponMessage('');
@@ -450,13 +460,11 @@ const UserBooking = () => {
     const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) { // Render 4 days for a bit more choice
       const d = new Date();
       d.setDate(d.getDate() + i);
       
       const label = weekdayNames[d.getDay()];
-
-      // Always format as local YYYY-MM-DD to match database calendars and prevent UTC timezone shifts
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
@@ -472,13 +480,18 @@ const UserBooking = () => {
     return dates;
   };
 
-  const horizontalDates = getHorizontalDates();
+  const horizontalDates = useMemo(() => getHorizontalDates(), []);
   const finalAmount = selectedTurf ? Math.max(0, selectedTurf.pricePerHour - couponDiscount) : 0;
+
+  // Filter only valid active slots to display
+  const activeValidSlots = useMemo(() => {
+    return availableSlots.filter((s) => isSlotTimeValid(s.time, bookingDate));
+  }, [availableSlots, bookingDate]);
 
   return (
     <div className="min-h-screen bg-brand-light pb-20">
       
-      {/* Toast popup */}
+      {/* Toast Alert */}
       {toastVisible && (
         <div className={`fixed top-6 right-6 px-6 py-4 rounded-xl z-50 shadow-premium flex items-center gap-3 font-semibold text-white animate-slide ${
           toastType === 'success' ? 'bg-brand-success' : 'bg-brand-danger'
@@ -489,94 +502,60 @@ const UserBooking = () => {
       )}
 
       {/* Top Stripe Navigation */}
-      <header className="h-[70px] bg-white border-b border-brand-border/60 flex items-center justify-between px-6 md:px-12 sticky top-0 z-40 shadow-soft">
+      <header className="h-[56px] sm:h-[70px] bg-white border-b border-brand-border/60 flex items-center justify-between px-4 sm:px-6 md:px-12 sticky top-0 z-40 shadow-soft">
         <div className="flex items-center gap-2">
-          <div className="bg-brand-highlight text-brand-accent p-2 rounded-lg border border-brand-border">
-            <Dribbble size={20} className="animate-pulse" />
+          <div className="bg-brand-highlight text-brand-accent p-1.5 sm:p-2 rounded-lg border border-brand-border/60">
+            <Dribbble size={18} className="animate-pulse" />
           </div>
-          <span className="font-sans font-extrabold text-brand-textDark tracking-tight text-lg">TURF HUB</span>
+          <span className="font-sans font-extrabold text-brand-textDark tracking-tight text-base sm:text-lg">TURF HUB</span>
+        </div>
+        <div className="hidden sm:flex items-center gap-4 text-xs font-semibold text-brand-textSecondary">
+          <span>Speedy Slot Booking Portal</span>
         </div>
       </header>
 
-      {/* Hero Welcome Intro */}
-      <div className="max-w-[1200px] mx-auto mt-8 px-6 text-center animate-fade">
-        <h1 className="text-3xl md:text-4xl font-extrabold text-brand-textDark tracking-tight">
-          Reserve Your Timing Slot
-        </h1>
-      </div>
+      {/* Main Single-Page Interface */}
+      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 mt-4 sm:mt-8">
+        
+        {/* Dynamic Title */}
+        <div className="mb-4 sm:mb-6 animate-fade">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-brand-textDark tracking-tight">
+            Reserve Your Timing Slot
+          </h1>
+          <p className="text-[11px] sm:text-xs text-brand-textSecondary mt-0.5 sm:mt-1">
+            Pick your preferred turf arena, select an available hour, and checkout instantly.
+          </p>
+        </div>
 
-      <div className="max-w-[1200px] mx-auto px-6 mt-10">
         {loading ? (
-          <div className="flex h-[40vh] items-center justify-center text-brand-accent">
-            <div className="text-center">
-              <div className="border-[3px] border-brand-highlight border-l-brand-accent rounded-full w-9 h-9 animate-spin mx-auto mb-3" />
-              <p className="text-sm font-medium">Syncing sports arenas...</p>
+          // Skeleton Loader for initial list
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 flex flex-col gap-6">
+              <div className="bg-white border border-brand-border/50 rounded-xl p-6 shadow-soft flex flex-col gap-4">
+                <div className="h-4 bg-brand-light animate-pulse rounded-lg w-1/4" />
+                <div className="h-16 bg-brand-light animate-pulse rounded-lg w-full" />
+                <div className="h-16 bg-brand-light animate-pulse rounded-lg w-full" />
+              </div>
             </div>
+            <div className="lg:col-span-1 bg-white border border-brand-border/50 rounded-xl p-6 h-40 shadow-soft animate-pulse" />
           </div>
         ) : error ? (
           <div className="bg-white border border-brand-border rounded-xl p-8 text-center text-brand-danger shadow-soft max-w-lg mx-auto">
             <p className="font-semibold text-sm">{error}</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            {/* Mobile Stepper Header (Wizard indicator) */}
-            <div className="lg:hidden">
-              <div className="flex bg-white border border-brand-border/60 rounded-xl p-1.5 shadow-soft justify-between items-center relative overflow-hidden">
-                {[
-                  { step: 1, label: 'Pick Turf' },
-                  { step: 2, label: 'Date & Slots' },
-                  { step: 3, label: 'Summary' },
-                ].map((item) => {
-                  const isCompleted = currentStep > item.step;
-                  const isCurrent = currentStep === item.step;
-                  return (
-                    <button
-                      key={item.step}
-                      type="button"
-                      onClick={() => {
-                        if (item.step === 1 || (item.step === 2 && selectedTurf) || (item.step === 3 && selectedTurf && selectedSlot)) {
-                          setCurrentStep(item.step);
-                        }
-                      }}
-                      className={`flex-1 text-center py-2 px-1 rounded-lg text-xxs font-extrabold transition-all duration-300 flex flex-col items-center gap-1.5 cursor-pointer ${
-                        isCurrent
-                          ? 'bg-brand-highlight text-brand-accent shadow-xs'
-                          : isCompleted
-                          ? 'text-brand-success'
-                          : 'text-brand-textMuted hover:text-brand-textSecondary'
-                      }`}
-                    >
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black border transition-all duration-300 ${
-                        isCurrent
-                          ? 'border-brand-accent bg-brand-accent text-white shadow-soft'
-                          : isCompleted
-                          ? 'border-brand-success bg-brand-success text-white'
-                          : 'border-brand-border bg-brand-light text-brand-textMuted'
-                      }`}>
-                        {item.step}
-                      </div>
-                      <span className="text-[9px] uppercase tracking-wider">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* LEFT 2 COLUMNS: Turf selection & Timing Picker (Single-Page Layout) */}
+            <div className="lg:col-span-2 flex flex-col gap-6 animate-fade">
               
-              {/* LEFT 2 COLUMNS: Slot Timings & Turfs Flow */}
-              <div className="lg:col-span-2 flex flex-col gap-6">
-                
-                {/* Step 1: Select Turf */}
-                <div className={`bg-white border border-brand-border/60 rounded-xl p-6 shadow-soft transition-all duration-300 hover:shadow-premium border-l-4 border-l-brand-success ${
-                  currentStep === 1 ? 'block' : 'hidden lg:block'
-                }`}>
-                  <h3 className="text-brand-textDark font-bold text-base flex items-center gap-2 mb-4">
-                    <span className="w-2 h-2 rounded-full bg-brand-success" /> Step 1: Pick Turf
-                  </h3>
+              {/* Turf List */}
+              <div className="bg-white border border-brand-border/60 rounded-xl p-4 sm:p-6 shadow-soft hover:shadow-premium transition-all duration-300">
+                <h3 className="text-brand-textDark font-extrabold text-xs sm:text-sm md:text-base flex items-center gap-2 mb-3 sm:mb-4">
+                  <span className="w-2.5 h-2.5 rounded-full bg-brand-success" /> Choose Sports Arena
+                </h3>
 
-                <div className="flex flex-col gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                   {turfs.map((t) => {
                     const isPicked = selectedTurf?._id === t._id;
                     return (
@@ -584,27 +563,30 @@ const UserBooking = () => {
                         key={t._id}
                         onClick={() => {
                           setSelectedTurf(t);
-                          setCurrentStep(2);
-                          triggerToast(`Selected ${t.name}. Moving to Date & Slots!`);
+                          triggerToast(`Selected ${t.name}`);
                         }}
-                        className={`p-4 rounded-lg border-2 cursor-pointer flex justify-between items-center transition-all duration-300 ${
+                        className={`p-3 sm:p-4 rounded-lg sm:rounded-xl border-2 cursor-pointer flex flex-col gap-2 sm:gap-2.5 transition-all duration-300 relative overflow-hidden ${
                           isPicked
-                            ? 'border-brand-accent bg-brand-light shadow-soft'
-                            : 'border-brand-border bg-white hover:border-brand-accent/50'
+                            ? 'border-brand-accent bg-brand-highlight/25 shadow-soft scale-[1.01]'
+                            : 'border-brand-border/40 bg-white hover:border-brand-accent/50 hover:bg-brand-light/30'
                         }`}
                       >
-                        <div className="flex-1 pr-4">
-                          <h4 className="font-bold text-brand-textDark text-sm md:text-base">{t.name}</h4>
-                          <div className="flex items-center gap-4 text-xs text-brand-textSecondary mt-1">
-                            <span className="flex items-center gap-1"><MapPin size={12} className="text-brand-accent" /> {t.location}</span>
+                        {isPicked && (
+                          <div className="absolute top-0 right-0 bg-brand-accent text-white p-1 rounded-bl-lg">
+                            <Check size={11} />
                           </div>
-                          <p className="text-xs text-brand-textMuted mt-2 leading-relaxed max-w-[450px]">
-                            {t.description}
-                          </p>
+                        )}
+                        <div>
+                          <h4 className="font-extrabold text-brand-textDark text-xs sm:text-sm">{t.name}</h4>
+                          <span className="text-[9px] sm:text-[10px] text-brand-textSecondary font-semibold uppercase tracking-wider block mt-0.5">{t.sportType}</span>
                         </div>
-                        <div className="text-right shrink-0">
-                          <span className="text-lg md:text-xl font-extrabold text-brand-textDark">₹{t.pricePerHour}</span>
-                          <span className="text-xxs text-brand-textMuted block">per hour</span>
+                        <div className="flex items-center gap-1.5 text-[10px] sm:text-xxs text-brand-textSecondary border-t border-brand-border/20 pt-1.5 sm:pt-2 mt-0.5">
+                          <MapPin size={11} className="text-brand-accent shrink-0" />
+                          <span className="truncate">{t.location}</span>
+                        </div>
+                        <div className="flex justify-between items-center border-t border-brand-border/25 pt-1.5 sm:pt-2 mt-1">
+                          <span className="text-[9px] sm:text-[10px] text-brand-textMuted font-medium">Hourly Pricing:</span>
+                          <span className="text-xs sm:text-sm font-black text-brand-textDark">₹{t.pricePerHour}</span>
                         </div>
                       </div>
                     );
@@ -612,20 +594,14 @@ const UserBooking = () => {
                 </div>
               </div>
 
-                {/* Step 2: Date Selector (Horizontal cards) */}
-                <div className={`bg-white border border-brand-border/60 rounded-xl p-6 shadow-soft transition-all duration-300 hover:shadow-premium border-l-4 border-l-brand-accent ${
-                  currentStep === 2 ? 'block' : 'hidden lg:block'
-                }`}>
-                  <h3 className="text-brand-textDark font-bold text-base flex items-center gap-2 mb-4">
-                    <span className="w-2 h-2 rounded-full bg-brand-accent" /> Step 2: Date & Available Slots
-                  </h3>
+              {/* Date & Hour Slots Selection (Combined in Single Screen) */}
+              <div className="bg-white border border-brand-border/60 rounded-xl p-4 sm:p-6 shadow-soft hover:shadow-premium transition-all duration-300">
+                <h3 className="text-brand-textDark font-extrabold text-xs sm:text-sm md:text-base flex items-center gap-2 mb-3 sm:mb-4">
+                  <span className="w-2.5 h-2.5 rounded-full bg-brand-accent" /> Date & Hour Slots Selection
+                </h3>
 
-                <label className="text-xs font-bold text-brand-textSecondary uppercase tracking-wider block mb-2">
-                  Select Timing Date
-                </label>
-
-                {/* Horizontal Date Picker Cards */}
-                <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar scroll-smooth">
+                {/* Horizontal Date picker */}
+                <div className="flex gap-2 overflow-x-auto pb-2.5 no-scrollbar scroll-smooth">
                   {horizontalDates.map((d, index) => {
                     const isSelected = bookingDate === d.value;
                     return (
@@ -633,17 +609,17 @@ const UserBooking = () => {
                         key={index}
                         type="button"
                         onClick={() => setBookingDate(d.value)}
-                        className={`flex-shrink-0 flex flex-col items-center justify-center p-3 rounded-lg border-2 w-[85px] transition-all duration-300 ${
+                        className={`flex-shrink-0 flex flex-col items-center justify-center p-2 sm:p-3 rounded-lg sm:rounded-xl border-2 w-[70px] sm:w-[85px] transition-all duration-300 ${
                           isSelected
-                            ? 'border-brand-accent bg-brand-accent text-white shadow-soft scale-102'
-                            : 'border-brand-border bg-white text-brand-textDark hover:border-brand-accent/50'
+                            ? 'border-brand-accent bg-brand-accent text-white shadow-soft scale-102 font-bold'
+                            : 'border-brand-border/40 bg-white text-brand-textDark hover:border-brand-accent/50'
                         }`}
                       >
-                        <span className={`text-xxs font-bold uppercase tracking-wider ${isSelected ? 'text-white/80' : 'text-brand-textMuted'}`}>
+                        <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-wider ${isSelected ? 'text-white/90' : 'text-brand-textMuted'}`}>
                           {d.label}
                         </span>
-                        <span className="text-lg font-extrabold mt-0.5">{d.day}</span>
-                        <span className={`text-xxs font-semibold ${isSelected ? 'text-white/80' : 'text-brand-textSecondary'}`}>
+                        <span className="text-sm sm:text-lg font-black mt-0.5 leading-none">{d.day}</span>
+                        <span className={`text-[8px] sm:text-[9px] font-bold ${isSelected ? 'text-white/90' : 'text-brand-textSecondary'}`}>
                           {d.month}
                         </span>
                       </button>
@@ -651,215 +627,250 @@ const UserBooking = () => {
                   })}
                 </div>
 
-                {/* Slot Selector Timing Cards */}
-                <div className="mt-6">
-                  <label className="text-xs font-bold text-brand-textSecondary uppercase tracking-wider block mb-3">
-                    Pick Timings Hours
-                  </label>
+                {/* Available Hours */}
+                <div className="mt-4 sm:mt-6 border-t border-brand-border/20 pt-4 sm:pt-5">
+                  <span className="text-[10px] sm:text-xs font-bold text-brand-textSecondary uppercase tracking-wider block mb-2.5 sm:mb-3.5">
+                    Available Slots ({bookingDate})
+                  </span>
 
-                  {!selectedTurf || !bookingDate ? (
-                    <div className="border border-dashed border-brand-border bg-brand-light/30 rounded-lg p-6 text-center text-xs text-brand-textMuted">
-                      Please pick both Turf and Date to display timings slots.
-                    </div>
-                  ) : slotsLoading ? (
-                    <div className="flex items-center gap-2 text-xs text-brand-accent">
+                  {slotsLoading ? (
+                    <div className="flex items-center gap-2 text-xs text-brand-accent py-6 justify-center">
                       <div className="border-2 border-brand-highlight border-l-brand-accent rounded-full w-4 h-4 animate-spin" />
-                      Scanning availability...
+                      Scanning slot status...
+                    </div>
+                  ) : activeValidSlots.length === 0 ? (
+                    <div className="border border-dashed border-brand-border/80 bg-brand-light/35 rounded-xl p-8 text-center text-xs text-brand-textMuted font-semibold">
+                      No matching slots found on this date. Please pick another date.
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 lg:max-h-[220px] lg:overflow-y-auto pr-1">
-                      {availableSlots
-                        .filter((s) => isSlotTimeValid(s.time, bookingDate))
-                        .map((s, idx) => (
-                          <button
-                            key={idx}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                      {activeValidSlots.map((s, idx) => (
+                        <button
+                          key={idx}
                           type="button"
                           disabled={!s.isAvailable}
                           onClick={() => {
                             setSelectedSlot(s.time);
-                            setCurrentStep(3);
-                            triggerToast(`Selected slot ${s.time}. Complete your contact info!`);
+                            // On mobile viewports, let users use the sticky bottom action bar to confirm.
+                            // On desktop, immediately open checkout popup modal.
+                            if (window.innerWidth >= 640) {
+                              setCheckoutModalOpen(true);
+                            } else {
+                              triggerToast(`Selected slot ${s.time}! Tap "Book Now" below.`);
+                            }
                           }}
-                          className={`py-3 px-2 rounded-lg border-2 text-center text-xs font-semibold transition-all duration-300 flex items-center justify-center gap-1.5 ${
+                          className={`py-2.5 px-2 rounded-lg border-2 text-center text-[10px] sm:text-xs font-bold transition-all duration-300 flex items-center justify-center gap-1.5 hover:scale-[1.01] ${
                             selectedSlot === s.time
                               ? 'bg-brand-accent text-white border-brand-accent shadow-soft'
                               : s.isAvailable
-                              ? 'bg-white border-brand-border text-brand-textDark hover:border-brand-accent/50 hover:bg-brand-light'
-                              : 'bg-gray-100 border-gray-200 text-gray-450 cursor-not-allowed opacity-75 line-through'
+                              ? 'bg-white border-brand-border/40 text-brand-textDark hover:border-brand-accent hover:bg-brand-highlight/20 hover:text-brand-accent'
+                              : 'bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed opacity-55 line-through'
                           }`}
                         >
-                          <Clock size={12} />
+                          <Clock size={11} className="shrink-0" />
                           {s.time}
                         </button>
                       ))}
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
 
-                  {/* Mobile Back navigation */}
-                  <div className="mt-5 flex lg:hidden">
-                    <button
-                      type="button"
-                      onClick={() => setCurrentStep(1)}
-                      className="w-full text-xs font-bold text-brand-textSecondary bg-brand-light border border-brand-border hover:bg-brand-highlight py-2.5 px-4 rounded-xl transition-all duration-300 cursor-pointer"
-                    >
-                      ← Back to Pick Turf
-                    </button>
+            {/* RIGHT COLUMN: Sidebar Summary Guide (Fidelity Assistant) */}
+            <div className="lg:col-span-1 animate-fade">
+              <div className="bg-white border border-brand-border/60 border-l-4 border-l-brand-accent rounded-xl p-6 shadow-soft hover:shadow-premium transition-all duration-300 sticky top-[95px] flex flex-col gap-4.5">
+                <div>
+                  <span className="text-[9px] font-black text-brand-accent uppercase tracking-wider block">Live Selection Summary</span>
+                  <h3 className="text-brand-textDark font-extrabold text-base mt-0.5">Your Active Slot</h3>
+                </div>
+
+                <div className="bg-brand-light/50 border border-brand-border/50 rounded-xl p-4 flex flex-col gap-3 text-xs leading-relaxed text-brand-textSecondary font-semibold">
+                  <div className="flex justify-between items-center border-b border-brand-border/20 pb-2">
+                    <span>Selected Turf:</span>
+                    <span className="font-extrabold text-brand-textDark truncate max-w-[150px]">{selectedTurf ? selectedTurf.name : 'None Selected'}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-brand-border/20 pb-2">
+                    <span>Booking Date:</span>
+                    <span className="font-extrabold text-brand-textDark">{bookingDate || 'None Selected'}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>Timing Slot:</span>
+                    <span className="font-extrabold text-brand-accent">{selectedSlot || 'Tap any slot below'}</span>
+                  </div>
+                </div>
+
+                <div className="bg-brand-highlight/35 border border-brand-border/40 rounded-xl p-4 flex gap-2 text-xxs text-brand-textSecondary leading-relaxed">
+                  <Info size={16} className="text-brand-accent shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-bold text-brand-textDark block mb-0.5">Speedy Booking Guide</strong>
+                    Simply tap any available timings slot card in the timeline to load the checkout drawer directly. No typing or multi-step wizard is needed.
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* RIGHT COLUMN: Player Info & Checkout Summary */}
-            <div className={`lg:col-span-1 ${
-              currentStep === 3 ? 'block' : 'hidden lg:block'
-            }`}>
-              <div className="bg-white border border-brand-border/60 border-l-4 border-l-brand-warning rounded-xl p-6 shadow-soft transition-all duration-300 hover:shadow-premium sticky top-[90px]">
-                <h3 className="text-brand-textDark font-bold text-base flex items-center gap-2 mb-4">
-                  <span className="w-2 h-2 rounded-full bg-brand-warning" /> Step 3: Booking Summary
-                </h3>
-
-                <form onSubmit={handleBookingSubmit} className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">
-                      Player Full Name
-                    </label>
-                    <div className="relative flex items-center">
-                      <User size={14} className="absolute left-3 text-brand-textMuted" />
-                      <input
-                        type="text"
-                        placeholder="E.g., David Beckham"
-                        className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 pl-9 pr-3 text-xs outline-none transition-all duration-300 focus:border-brand-accent focus:ring-3 focus:ring-brand-accentGlow"
-                        value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">
-                      Mobile Number
-                    </label>
-                    <div className="relative flex items-center">
-                      <Phone size={14} className="absolute left-3 text-brand-textMuted" />
-                      <input
-                        type="tel"
-                        placeholder="10 digit phone number"
-                        className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 pl-9 pr-3 text-xs outline-none transition-all duration-300 focus:border-brand-accent focus:ring-3 focus:ring-brand-accentGlow"
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">
-                      Email Address
-                    </label>
-                    <div className="relative flex items-center">
-                      <Mail size={14} className="absolute left-3 text-brand-textMuted" />
-                      <input
-                        type="email"
-                        placeholder="player@example.com"
-                        className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 pl-9 pr-3 text-xs outline-none transition-all duration-300 focus:border-brand-accent focus:ring-3 focus:ring-brand-accentGlow"
-                        value={customerEmail}
-                        onChange={(e) => setCustomerEmail(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/* Promo coupons */}
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">
-                      Apply Promo Coupon
-                    </label>
-                    <div className="flex gap-2">
-                      <div className="relative flex items-center flex-1">
-                        <Ticket size={14} className="absolute left-3 text-brand-textMuted" />
-                        <input
-                          type="text"
-                          placeholder="WELCOME200"
-                          className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 pl-9 pr-2 text-xs outline-none transition-all duration-300 uppercase focus:border-brand-accent focus:ring-3 focus:ring-brand-accentGlow"
-                          value={couponCode}
-                          onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleApplyCoupon}
-                        className="text-xs font-semibold px-4 rounded-lg bg-brand-light hover:bg-brand-highlight text-brand-accent border border-brand-border transition-all duration-300"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                    {couponMessage && (
-                      <span className={`text-[10px] font-semibold mt-1 block ${
-                        couponSuccess ? 'text-brand-success' : 'text-brand-danger'
-                      }`}>
-                        {couponMessage}
-                      </span>
-                    )}
-                  </div>
-                  {/* Pricing and Submit */}
-                  <div className="border-t border-brand-border/60 pt-4 mt-2 flex flex-col gap-1.5">
-                    <div className="flex justify-between text-xs text-brand-textSecondary">
-                      <span>Base Turf Cost:</span>
-                      <span className="font-semibold">₹{selectedTurf ? selectedTurf.pricePerHour : 0}</span>
-                    </div>
-                    {couponSuccess && (
-                      <div className="flex justify-between text-xs text-brand-success">
-                        <span>Coupon Discount:</span>
-                        <span className="font-semibold">-₹{couponDiscount}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-sm text-brand-textDark font-extrabold border-t border-brand-border/40 pt-2.5 mt-1.5">
-                      <span>Total Amount:</span>
-                      <span className="text-lg">₹{finalAmount}</span>
-                    </div>
-                  </div>
-
-                  {/* Split mobile actions / Full-width desktop actions */}
-                  <div className="flex gap-3 mt-2 lg:hidden">
-                    <button
-                      type="button"
-                      onClick={() => setCurrentStep(2)}
-                      className="flex-1 text-xs font-bold text-brand-textSecondary bg-brand-light border border-brand-border hover:bg-brand-highlight py-3 px-4 rounded-xl transition-all duration-300 cursor-pointer animate-fade-in"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submitting || !selectedTurf || !bookingDate || !selectedSlot}
-                      className="flex-[2] bg-brand-accent hover:bg-brand-accentHover disabled:bg-brand-textMuted text-white text-xs font-bold py-3 px-4 rounded-xl shadow-premium tracking-wide uppercase transition-all duration-300 cursor-pointer"
-                    >
-                      {submitting ? 'Booking...' : 'Book Slot'}
-                    </button>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={submitting || !selectedTurf || !bookingDate || !selectedSlot}
-                    className="hidden lg:block w-full bg-brand-accent hover:bg-brand-accentHover disabled:bg-brand-textMuted text-white text-xs font-bold py-3.5 px-4 rounded-lg shadow-premium tracking-wide uppercase transition-all duration-300 mt-2 hover:scale-[1.01] cursor-pointer"
-                  >
-                    {submitting ? 'Creating booking...' : 'Book Playing Slot'}
-                  </button>
-                </form>
-              </div>
-            </div>
-
           </div>
-        </div>
         )}
       </div>
 
+      {/* QUICK CHECKOUT POPUP MODAL (Zero-Typing, Single-Page Checkout Drawer) */}
+      {checkoutModalOpen && selectedTurf && selectedSlot && (
+        <div className="fixed inset-0 bg-brand-textDark/60 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto animate-fade">
+          <div className="bg-white border border-brand-border shadow-premium rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 max-w-lg w-full relative flex flex-col gap-3.5 sm:gap-5 overflow-y-auto animate-fade max-h-[96vh] my-auto">
+            {/* Top decorative stripe */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-brand-accent to-blue-500" />
+            
+            <button
+              onClick={() => setCheckoutModalOpen(false)}
+              className="absolute top-5 right-5 text-brand-textSecondary hover:text-brand-accent transition-all duration-300"
+            >
+              <X size={18} />
+            </button>
 
+            <div>
+              <span className="text-[9px] font-black text-brand-accent uppercase tracking-wider block">TIMING RESERVATION</span>
+              <h2 className="text-base font-extrabold text-brand-textDark tracking-tight mt-0.5">Confirm Checkout Details</h2>
+            </div>
 
-      {/* MODAL 2: Dynamic Success QR code receipt Card */}
+            {/* Quick summary box */}
+            <div className="bg-brand-light border border-brand-border/60 rounded-xl p-3.5 flex justify-between items-center text-xs">
+              <div>
+                <span className="font-extrabold text-brand-textDark">{selectedTurf.name}</span>
+                <span className="text-[10px] text-brand-textSecondary block mt-0.5">{bookingDate} • {selectedSlot}</span>
+              </div>
+              <div className="text-right">
+                <span className="font-black text-sm text-brand-textDark">₹{selectedTurf.pricePerHour}</span>
+                <span className="text-[9px] text-brand-textMuted block">hourly rate</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleBookingSubmit} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">Player Full Name</label>
+                <div className="relative flex items-center">
+                  <User size={13} className="absolute left-3 text-brand-textMuted" />
+                  <input
+                    type="text"
+                    placeholder="E.g., David Beckham"
+                    className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 pl-9 pr-3 text-xs outline-none transition-all duration-300 focus:border-brand-accent focus:ring-3 focus:ring-brand-accentGlow font-semibold"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">Mobile Number</label>
+                  <div className="relative flex items-center">
+                    <Phone size={13} className="absolute left-3 text-brand-textMuted" />
+                    <input
+                      type="tel"
+                      placeholder="10-digit number"
+                      className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 pl-9 pr-3 text-xs outline-none transition-all duration-300 focus:border-brand-accent focus:ring-3 focus:ring-brand-accentGlow font-semibold"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">Email Address</label>
+                  <div className="relative flex items-center">
+                    <Mail size={13} className="absolute left-3 text-brand-textMuted" />
+                    <input
+                      type="email"
+                      placeholder="player@example.com"
+                      className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 pl-9 pr-3 text-xs outline-none transition-all duration-300 focus:border-brand-accent focus:ring-3 focus:ring-brand-accentGlow font-semibold"
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Promo Coupon Row */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">Apply Promo Coupon</label>
+                <div className="flex gap-2">
+                  <div className="relative flex items-center flex-1">
+                    <Ticket size={13} className="absolute left-3 text-brand-textMuted" />
+                    <input
+                      type="text"
+                      placeholder="WELCOME200"
+                      className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2 pl-9 pr-2 text-xs outline-none transition-all duration-300 uppercase focus:border-brand-accent focus:ring-3 focus:ring-brand-accentGlow font-bold"
+                      value={couponCode}
+                      onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleApplyCoupon}
+                    className="text-xs font-bold px-4 rounded-lg bg-brand-light hover:bg-brand-highlight text-brand-accent border border-brand-border transition-all duration-300 cursor-pointer"
+                  >
+                    Apply
+                  </button>
+                </div>
+                {couponMessage && (
+                  <span className={`text-[10px] font-bold mt-1 block ${
+                    couponSuccess ? 'text-brand-success' : 'text-brand-danger'
+                  }`}>
+                    {couponMessage}
+                  </span>
+                )}
+              </div>
+
+              {/* Billing Breakdowns */}
+              <div className="border-t border-brand-border/40 pt-3 mt-1 flex flex-col gap-1.5 text-xs text-brand-textSecondary">
+                {couponSuccess && (
+                  <div className="flex justify-between text-brand-success font-semibold">
+                    <span>Coupon Applied:</span>
+                    <span>-₹{couponDiscount}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-brand-textDark font-extrabold border-t border-brand-border/20 pt-2 mt-1">
+                  <span className="text-sm">Total Payable Amount:</span>
+                  <span className="text-base text-brand-accent">₹{finalAmount}</span>
+                </div>
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="flex gap-3 mt-3">
+                <button
+                  type="button"
+                  onClick={() => setCheckoutModalOpen(false)}
+                  className="flex-1 text-xs font-bold text-brand-textSecondary bg-brand-light border border-brand-border hover:bg-brand-highlight py-3.5 px-4 rounded-xl transition-all duration-300 cursor-pointer text-center"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-[2] bg-brand-accent hover:bg-brand-accentHover disabled:bg-brand-textMuted text-white text-xs font-bold py-3.5 px-4 rounded-xl shadow-premium tracking-wide uppercase transition-all duration-300 cursor-pointer flex items-center justify-center gap-1.5 hover:scale-[1.01]"
+                >
+                  {submitting ? (
+                    <>
+                      <div className="border-2 border-white/20 border-l-white rounded-full w-4 h-4 animate-spin" />
+                      Creating Slot Reservation...
+                    </>
+                  ) : (
+                    `Confirm & Pay Online`
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DYNAMIC SUCCESS QR CARD MODAL */}
       {receiptModalOpen && activeBooking && (
-        <div className="fixed inset-0 bg-brand-textDark/65 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade">
-          <div className="bg-white border border-brand-border shadow-premium rounded-xl p-6 md:p-8 max-w-sm w-full text-center relative flex flex-col gap-5 animate-fade">
+        <div className="fixed inset-0 bg-brand-textDark/65 backdrop-blur-md flex items-center justify-center z-50 p-4 overflow-y-auto animate-fade">
+          <div className="bg-white border border-brand-border shadow-premium rounded-xl p-6 md:p-8 max-w-sm w-full text-center relative flex flex-col gap-4.5 animate-fade my-6 max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setReceiptModalOpen(false)}
               className="absolute top-4 right-4 text-brand-textSecondary hover:text-brand-accent transition-all duration-300"
@@ -869,15 +880,18 @@ const UserBooking = () => {
 
             <div>
               <div className="bg-brand-highlight text-brand-accent p-3.5 rounded-full inline-flex border border-brand-border/60 mx-auto">
-                <Check size={28} />
+                <Check size={26} />
               </div>
-              <h2 className="text-lg font-extrabold text-brand-textDark mt-3 tracking-tight">Booking Confirmed!</h2>
-              <p className="text-xs text-brand-textSecondary mt-1">Timings successfully reserved.</p>
+              <h2 className="text-base font-extrabold text-brand-textDark mt-3.5 tracking-tight">Booking Confirmed!</h2>
+              <p className="text-xs text-brand-textSecondary mt-0.5">Your timing slot is successfully reserved.</p>
+              <p className="text-[10px] sm:text-xs text-brand-success font-bold mt-1.5 bg-green-50 border border-green-200 rounded-lg py-1 px-2.5 inline-block">
+                Check your Gmail for ticket anytime!
+              </p>
             </div>
 
-            {/* Programmatic base64 receipt QR */}
+            {/* QR ticket */}
             {activeBooking.qrCodeData && (
-              <div className="bg-white border border-brand-border/60 p-4 rounded-lg w-[170px] h-[170px] mx-auto flex items-center justify-center shadow-soft">
+              <div className="bg-white border border-brand-border/60 p-3.5 rounded-xl w-[170px] h-[170px] mx-auto flex items-center justify-center shadow-soft">
                 <img
                   src={activeBooking.qrCodeData}
                   alt={`Receipt code ${activeBooking.bookingId}`}
@@ -886,7 +900,7 @@ const UserBooking = () => {
               </div>
             )}
 
-            <div className="bg-brand-light border border-brand-border/60 rounded-lg p-4 text-left text-xs flex flex-col gap-2">
+            <div className="bg-brand-light border border-brand-border/60 rounded-xl p-4 text-left text-xs flex flex-col gap-2">
               <div className="flex justify-between">
                 <span className="text-brand-textMuted">Booking ID:</span>
                 <span className="font-extrabold text-brand-textDark">{activeBooking.bookingId}</span>
@@ -897,37 +911,36 @@ const UserBooking = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-brand-textMuted">Timing:</span>
-                <span className="font-semibold text-brand-textDark">{activeBooking.date} ({activeBooking.slot})</span>
+                <span className="font-semibold text-brand-textDark truncate max-w-[160px]">{activeBooking.date} ({activeBooking.slot})</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-brand-textMuted">Payment Status:</span>
                 <span className="font-bold text-brand-success">{activeBooking.paymentStatus} ({activeBooking.paymentMethod})</span>
               </div>
-              <div className="flex justify-between border-t border-brand-border/40 pt-2.5 mt-1.5">
+              <div className="flex justify-between border-t border-brand-border/40 pt-2.5 mt-1">
                 <span className="font-bold text-brand-textDark">Paid Total:</span>
                 <span className="font-extrabold text-brand-accent text-sm">₹{activeBooking.finalAmount}</span>
               </div>
             </div>
 
-            <div className="mt-2">
+            <div className="mt-1">
               <button
                 onClick={downloadReceiptAsPNG}
-                className="w-full bg-brand-success hover:bg-green-600 text-white py-3 px-4 rounded-lg font-bold text-xs tracking-wider uppercase transition-all duration-300 flex items-center justify-center gap-1.5 shadow-soft hover:scale-[1.01]"
+                className="w-full bg-brand-success hover:bg-green-600 text-white py-3.5 px-4 rounded-xl font-bold text-xs tracking-wider uppercase transition-all duration-300 flex items-center justify-center gap-1.5 shadow-soft hover:scale-[1.01]"
               >
-                <Download size={14} /> Download Receipt
+                <Download size={14} /> Download Receipt Card
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL 3: Custom Simulated Razorpay Sandbox Modal */}
+      {/* RAZORPAY SANDBOX MOCK MODAL */}
       {mockRazorpayOpen && activeBooking && (
         <div className="fixed inset-0 bg-brand-textDark/65 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade animate-in fade-in zoom-in-95 duration-200">
-          <div className="bg-white border-2 border-brand-accent/35 shadow-premium rounded-xl p-6 md:p-8 max-w-md w-full relative flex flex-col gap-5 overflow-hidden">
+          <div className="bg-white border-2 border-brand-accent/35 shadow-premium rounded-xl p-6 md:p-8 max-w-md w-full relative flex flex-col gap-4.5 overflow-hidden">
             
-            {/* Top decorative stripe */}
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-brand-accent to-blue-600" />
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-brand-accent to-blue-500" />
             
             <div className="flex justify-between items-start mt-2">
               <div className="flex items-center gap-2">
@@ -947,29 +960,25 @@ const UserBooking = () => {
               </button>
             </div>
 
-            <div className="border border-yellow-200 bg-yellow-50/50 rounded-xl p-4 flex gap-3 text-xs text-yellow-800 leading-relaxed shadow-soft">
+            <div className="border border-yellow-250 bg-yellow-50/50 rounded-xl p-4 flex gap-3 text-xs text-yellow-800 leading-relaxed shadow-soft">
               <Info size={18} className="text-yellow-600 shrink-0 mt-0.5" />
               <div>
                 <strong className="font-bold text-yellow-900">Sandbox Test Mode Enabled</strong>
-                <p className="mt-0.5 text-yellow-800 text-[11px]">We detected no active or real Razorpay API keys, or standard offline development mode. You can simulate success/failure below.</p>
+                <p className="mt-0.5 text-yellow-850 text-[11px]">We detected no active or real Razorpay API keys. You can simulate success/failure below.</p>
               </div>
             </div>
 
             <div className="bg-brand-light border border-brand-border/60 rounded-xl p-4 flex flex-col gap-2.5 text-xs">
               <div className="flex justify-between">
-                <span className="text-brand-textMuted font-medium">Recipient Merchant:</span>
+                <span className="text-brand-textMuted font-medium">Merchant:</span>
                 <span className="font-bold text-brand-textDark">Turf Booking Hub</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-brand-textMuted font-medium">Order Reference ID:</span>
+                <span className="text-brand-textMuted font-medium">Order ID:</span>
                 <span className="font-mono text-[10px] font-bold text-brand-textDark">{activeBooking.razorpayOrderId}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-brand-textMuted font-medium">Customer Contact:</span>
-                <span className="font-semibold text-brand-textDark">{activeBooking.customerName}</span>
-              </div>
-              <div className="flex justify-between border-t border-brand-border/40 pt-2.5 mt-1">
-                <span className="font-bold text-brand-textDark">Amount Payable:</span>
+                <span className="text-brand-textMuted font-medium">Amount Payable:</span>
                 <span className="font-extrabold text-brand-accent text-sm">₹{activeBooking.finalAmount}</span>
               </div>
             </div>
@@ -989,11 +998,24 @@ const UserBooking = () => {
                 <X size={14} /> Simulate Cancel / Failure
               </button>
             </div>
-            
-            <div className="text-center">
-              <span className="text-[9px] text-brand-textMuted font-semibold uppercase tracking-wider block">Secured by program sandbox simulation</span>
-            </div>
           </div>
+        </div>
+      )}
+
+      {/* STICKY BOTTOM ACTION BAR FOR MOBILE */}
+      {selectedSlot && selectedTurf && !checkoutModalOpen && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-brand-border/60 p-3 z-40 flex items-center justify-between shadow-premium sm:hidden animate-fade">
+          <div className="flex flex-col min-w-0">
+            <span className="text-[9px] text-brand-textMuted font-bold uppercase tracking-wider">Timing Hour</span>
+            <span className="text-[11px] font-black text-brand-textDark truncate leading-tight mt-0.5">{bookingDate} • {selectedSlot}</span>
+            <span className="text-xs font-black text-brand-accent mt-0.5 leading-none">₹{finalAmount} Total</span>
+          </div>
+          <button
+            onClick={() => setCheckoutModalOpen(true)}
+            className="bg-brand-accent hover:bg-brand-accentHover text-white text-xs font-black py-3 px-5 rounded-xl shadow-premium tracking-wide uppercase transition-all duration-300 active:scale-[0.98] shrink-0"
+          >
+            Book Now
+          </button>
         </div>
       )}
     </div>

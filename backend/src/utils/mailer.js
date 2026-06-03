@@ -1,36 +1,26 @@
-const nodemailer = require('nodemailer');
-
-// Build the mail SMTP transporter if environment values are available
-const getTransporter = () => {
-  const service = process.env.EMAIL_SERVICE || 'gmail';
-  const user = process.env.EMAIL_USER;
-  const pass = process.env.EMAIL_PASS;
-
-  // Graceful configuration check to prevent transporter crash on missing/placeholder credentials
-  if (!user || !pass || pass.includes('your-google-app-password') || user.includes('your-business-email')) {
-    console.warn('⚠️ Mailing Warning: SMTP credentials are not fully configured inside backend/.env. Automated email receipts will be bypassed.');
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    service,
-    auth: {
-      user,
-      pass,
-    },
-  });
-};
+/**
+ * 📧 Brevo HTTP Email Dispatcher
+ * 
+ * Sends high-fidelity responsive HTML booking receipts using the Brevo HTTP API (Port 443)
+ * instead of direct SMTP to completely bypass cloud outbound firewalls (like Render free tiers).
+ */
 
 /**
  * Sends a high-fidelity booking invoice receipt directly to the customer's email ID.
- * Supports standard Nodemailer SMTP and fallback to Brevo HTTPS REST API to bypass cloud port blocks.
  * @param {Object} booking - The Mongoose booking record document
  * @param {String} turfName - The human-readable name of the reserved sports turf
+ * @returns {Promise<Boolean>} Success status
  */
 const sendReceiptEmail = async (booking, turfName) => {
   try {
     if (!booking.customerEmail) {
       console.warn(`⚠️ Mailing Warning: Missing customerEmail on booking ${booking.bookingId}. Skipping email send.`);
+      return false;
+    }
+
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) {
+      console.warn('⚠️ Mailing Warning: BREVO_API_KEY is not configured inside backend/.env. Automated email receipts will be bypassed.');
       return false;
     }
 
@@ -50,7 +40,7 @@ const sendReceiptEmail = async (booking, turfName) => {
             ${booking.qrCodeData ? `
             <div style="text-align: center; margin-bottom: 24px;">
               <div style="background: #f8fafc; border: 1px dashed #cbd5e1; padding: 12px; border-radius: 12px; display: inline-block;">
-                <img src="cid:receipt-qr" alt="Ticket QR code" style="width: 140px; height: 140px; display: block; margin: 0 auto;" />
+                <img src="cid:receipt-qr.png" alt="Ticket QR code" style="width: 140px; height: 140px; display: block; margin: 0 auto;" />
               </div>
               <p style="margin: 8px 0 0 0; font-size: 10px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Present QR Code at Reception</p>
             </div>
@@ -103,62 +93,45 @@ const sendReceiptEmail = async (booking, turfName) => {
         </div>
       `;
 
-    // A. HTTP REST API (Brevo) - Primary Production Option to completely bypass SMTP cloud firewalls
-    if (process.env.BREVO_API_KEY) {
-      console.log('⚡ Detected BREVO_API_KEY. Sending receipt email via Brevo HTTP REST API (Port 443)...');
-      const senderEmail = process.env.EMAIL_USER || 'learn.microx@gmail.com';
-      const inlineHtmlContent = htmlText.replace('src="cid:receipt-qr"', `src="${booking.qrCodeData}"`);
-
-      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'accept': 'application/json',
-          'api-key': process.env.BREVO_API_KEY,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          sender: { name: 'Turf Hub', email: senderEmail },
-          to: [{ email: booking.customerEmail, name: booking.customerName }],
-          subject: `⚡ Booking Confirmed! Ticket ID: ${booking.bookingId}`,
-          htmlContent: inlineHtmlContent
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`🚀 Automated receipt email dispatched successfully via Brevo HTTP REST API. Message ID: ${data.messageId || 'N/A'}`);
-        return true;
-      } else {
-        const errText = await response.text();
-        console.error('❌ Brevo HTTP API dispatch failed:', errText);
-        // Fail over to SMTP fallback
-      }
-    }
-
-    // B. Standard Nodemailer SMTP Transporter - Secondary Fallback (Local environment or unblocked servers)
-    const transporter = getTransporter();
-    if (!transporter) {
-      console.log(`ℹ️ Booking confirmation logged. Email receipt bypassed (SMTP/API not configured) for: ${booking.customerEmail}`);
-      return false;
-    }
-
-    const mailOptions = {
-      from: `"Turf Hub" <${process.env.EMAIL_USER}>`,
-      to: booking.customerEmail,
+    console.log('⚡ Sending receipt email via Brevo HTTP REST API (Port 443)...');
+    const senderEmail = process.env.EMAIL_USER || 'learn.microx@gmail.com';
+    
+    const bodyPayload = {
+      sender: { name: 'Turf Hub', email: senderEmail },
+      to: [{ email: booking.customerEmail, name: booking.customerName }],
       subject: `⚡ Booking Confirmed! Ticket ID: ${booking.bookingId}`,
-      html: htmlText,
-      attachments: booking.qrCodeData ? [
-        {
-          filename: `QR_${booking.bookingId}.png`,
-          path: booking.qrCodeData, // Attaches base64 data URI cleanly
-          cid: 'receipt-qr', // Inline content-id reference
-        }
-      ] : []
+      htmlContent: htmlText
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`🚀 Automated receipt email dispatched successfully via SMTP to ${booking.customerEmail}. Message ID: ${info.messageId}`);
-    return true;
+    if (booking.qrCodeData) {
+      const base64Content = booking.qrCodeData.split(',')[1];
+      bodyPayload.attachment = [
+        {
+          content: base64Content,
+          name: 'receipt-qr.png'
+        }
+      ];
+    }
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': apiKey,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(bodyPayload)
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`🚀 Automated receipt email dispatched successfully via Brevo HTTP REST API. Message ID: ${data.messageId || 'N/A'}`);
+      return true;
+    } else {
+      const errText = await response.text();
+      console.error('❌ Brevo HTTP API dispatch failed:', errText);
+      return false;
+    }
   } catch (err) {
     console.error(`⚠️ Mailing Error: Failed to send automated email receipt to ${booking.customerEmail}. Detail:`, err.message);
     return false;

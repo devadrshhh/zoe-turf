@@ -1,11 +1,23 @@
 const Turf = require('../models/Turf');
+const { getCache, setCache, clearCache } = require('../utils/cache');
 
 // @desc    Get All Turfs (public/admin list)
 // @route   GET /api/turfs
 // @access  Public
 const getTurfs = async (req, res, next) => {
   try {
-    const turfs = await Turf.find({ isActive: true }).sort({ createdAt: -1 });
+    const cachedTurfs = getCache('public_turfs');
+    if (cachedTurfs) {
+      return res.status(200).json({
+        success: true,
+        count: cachedTurfs.length,
+        turfs: cachedTurfs,
+      });
+    }
+
+    const turfs = await Turf.find({ isActive: true }).sort({ createdAt: -1 }).lean();
+    setCache('public_turfs', turfs, 300); // Cache for 5 minutes
+
     res.status(200).json({
       success: true,
       count: turfs.length,
@@ -21,7 +33,7 @@ const getTurfs = async (req, res, next) => {
 // @access  Private
 const getAdminTurfs = async (req, res, next) => {
   try {
-    const turfs = await Turf.find().sort({ createdAt: -1 });
+    const turfs = await Turf.find().sort({ createdAt: -1 }).lean();
     res.status(200).json({
       success: true,
       count: turfs.length,
@@ -37,7 +49,7 @@ const getAdminTurfs = async (req, res, next) => {
 // @access  Public
 const getTurfById = async (req, res, next) => {
   try {
-    const turf = await Turf.findById(req.params.id);
+    const turf = await Turf.findById(req.params.id).lean();
     if (!turf) {
       return res.status(404).json({
         success: false,
@@ -75,6 +87,8 @@ const createTurf = async (req, res, next) => {
       sportType,
     });
 
+    clearCache('public_turfs');
+
     res.status(201).json({
       success: true,
       message: 'Turf created successfully',
@@ -111,6 +125,8 @@ const updateTurf = async (req, res, next) => {
 
     const updatedTurf = await turf.save();
 
+    clearCache('public_turfs');
+
     res.status(200).json({
       success: true,
       message: 'Turf updated successfully',
@@ -136,6 +152,8 @@ const deleteTurf = async (req, res, next) => {
 
     await Turf.findByIdAndDelete(req.params.id);
 
+    clearCache('public_turfs');
+
     res.status(200).json({
       success: true,
       message: 'Turf deleted successfully',
@@ -160,6 +178,8 @@ const updateAllTurfPrices = async (req, res, next) => {
     }
 
     await Turf.updateMany({}, { pricePerHour: Number(amount) });
+
+    clearCache('public_turfs');
 
     res.status(200).json({
       success: true,

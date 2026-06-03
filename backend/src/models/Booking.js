@@ -90,4 +90,7 @@ const bookingSchema = new mongoose.Schema(
   }
 );
 
+// Optimize slot availability checks and booking lookups
+bookingSchema.index({ turf: 1, date: 1, status: 1 });
+
 module.exports = mongoose.model('Booking', bookingSchema);

@@ -5,7 +5,7 @@ const Coupon = require('../models/Coupon');
 // @access  Private (Admins Only)
 const getCoupons = async (req, res, next) => {
   try {
-    const coupons = await Coupon.find().sort({ createdAt: -1 });
+    const coupons = await Coupon.find().sort({ createdAt: -1 }).lean();
     res.status(200).json({
       success: true,
       coupons,
@@ -122,7 +122,7 @@ const applyCoupon = async (req, res, next) => {
       });
     }
 
-    const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true });
+    const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true }).lean();
     if (!coupon) {
       return res.status(400).json({
         success: false,

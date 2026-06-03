@@ -1,0 +1,12 @@
+{
+  "name": "turf-booking-system-root",
+  "version": "1.0.0",
+  "description": "Root orchestrator for unified MERN Turf Booking deployment on Render",
+  "scripts": {
+    "build": "npm install --prefix frontend && npm run build --prefix frontend && npm install --prefix backend && node scripts/copy-build.js",
+    "start": "node backend/src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -9,7 +9,9 @@ import axios from 'axios';
  */
 
 const getBaseUrl = () => {
-  const url = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const isProd = import.meta.env.PROD;
+  const defaultUrl = isProd ? window.location.origin : 'http://localhost:5000';
+  const url = import.meta.env.VITE_API_URL || defaultUrl;
   // Ensure the base URL always ends with '/api' for backend route mapping
   return url.endsWith('/api') ? url : `${url.replace(/\/$/, '')}/api`;
 };

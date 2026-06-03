@@ -24,8 +24,13 @@ const couponRoutes = require('./routes/couponRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 
+const compression = require('compression');
+
 // Initialize app
 const app = express();
+
+// Enable Gzip/Brotli payload compression
+app.use(compression());
 
 // Set security headers
 app.use(
@@ -67,13 +72,25 @@ app.use('/api/coupons', couponRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
-// Base route test
-app.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'MERN Turf Booking System API operational',
+// Serve static assets in production
+const path = require('path');
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../public')));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(path.join(__dirname, '../public/index.html'));
   });
-});
+} else {
+  // Base route test
+  app.get('/', (req, res) => {
+    res.json({
+      success: true,
+      message: 'MERN Turf Booking System API operational',
+    });
+  });
+}
 
 // Central Error Middleware
 app.use(errorHandler);

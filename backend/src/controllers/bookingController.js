@@ -80,7 +80,8 @@ const getBookings = async (req, res, next) => {
 
     const bookings = await Booking.find(query)
       .populate('turf', 'name location pricePerHour sportType')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     res.status(200).json({
       success: true,
@@ -119,7 +120,7 @@ const getSlotsAvailable = async (req, res, next) => {
       turf: turfId,
       date,
       status: 'Confirmed',
-    });
+    }).select('slot').lean();
 
     const bookedSlots = activeBookings.map((b) => b.slot);
 
@@ -183,7 +184,7 @@ const createBooking = async (req, res, next) => {
       date,
       slot,
       status: 'Confirmed',
-    });
+    }).select('_id').lean();
 
     if (slotExists) {
       return res.status(400).json({
@@ -508,7 +509,8 @@ const exportBookings = async (req, res, next) => {
       // Export Bookings (default)
       const bookings = await Booking.find(query)
         .populate('turf', 'name location pricePerHour')
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .lean();
 
       const worksheet = workbook.addWorksheet('Bookings');
 
@@ -680,7 +682,8 @@ const lookupBookingById = async (req, res, next) => {
   try {
     const { bookingId } = req.params;
     const booking = await Booking.findOne({ bookingId })
-      .populate('turf', 'name pricePerHour location');
+      .populate('turf', 'name pricePerHour location')
+      .lean();
     
     if (!booking) {
       return res.status(404).json({

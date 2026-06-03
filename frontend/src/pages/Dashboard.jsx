@@ -21,66 +21,67 @@ import {
   Plus
 } from 'lucide-react';
 
+// Audio synthesis feedback using Web Audio API
+const playSuccessSound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // Play two notes for a satisfying confirmation tone (E5 -> A5)
+    const playNote = (freq, duration, delay) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
+      
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + delay + duration);
+      
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      
+      osc.start(audioCtx.currentTime + delay);
+      osc.stop(audioCtx.currentTime + delay + duration);
+    };
+
+    playNote(659.25, 0.08, 0); // E5
+    playNote(880.00, 0.15, 0.06); // A5
+  } catch (err) {
+    console.warn('Audio feedback failed:', err);
+  }
+};
+
+const playErrorSound = () => {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.type = 'triangle'; // rougher tone
+    osc.frequency.setValueAtTime(180, audioCtx.currentTime); // Low buzz
+    
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+    
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.3);
+  } catch (err) {
+    console.warn('Audio feedback failed:', err);
+  }
+};
+
 // QR Viewfinder component using html5-qrcode
 const QrCameraScanner = ({ onScanned, onClose }) => {
   const [cameras, setCameras] = useState([]);
   const [activeCameraId, setActiveCameraId] = useState('');
   const [scanError, setScanError] = useState('');
   const [isScanning, setIsScanning] = useState(false);
+  const [isStarting, setIsStarting] = useState(true);
   const scannerRef = React.useRef(null);
-
-  useEffect(() => {
-    Html5Qrcode.getCameras()
-      .then((devices) => {
-        if (devices && devices.length > 0) {
-          setCameras(devices);
-          // Auto-select back camera or first device
-          const backCam = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('environment'));
-          setActiveCameraId(backCam ? backCam.id : devices[0].id);
-        } else {
-          setScanError('No camera devices detected on this system.');
-        }
-      })
-      .catch((err) => {
-        console.error('Error getting cameras:', err);
-        setScanError('Webcam permission requested or permission denied.');
-      });
-
-    return () => {
-      stopScanner();
-    };
-  }, []);
-
-  const startScanner = async (cameraId) => {
-    try {
-      if (scannerRef.current) {
-        await stopScanner();
-      }
-      setScanError('');
-      const html5QrCode = new Html5Qrcode("qr-reader");
-      scannerRef.current = html5QrCode;
-      
-      setIsScanning(true);
-      await html5QrCode.start(
-        cameraId,
-        {
-          fps: 10,
-          qrbox: { width: 220, height: 220 }
-        },
-        (decodedText) => {
-          stopScanner();
-          onScanned(decodedText);
-        },
-        (errorMessage) => {
-          // Silently capture or ignore scanner frame processing failures
-        }
-      );
-    } catch (err) {
-      console.error('Error starting QR scanner:', err);
-      setScanError('Camera initialization failed or already active elsewhere.');
-      setIsScanning(false);
-    }
-  };
+  const hasScannedRef = React.useRef(false);
 
   const stopScanner = async () => {
     if (scannerRef.current && scannerRef.current.isScanning) {
@@ -93,28 +94,180 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
     setIsScanning(false);
   };
 
-  useEffect(() => {
-    if (activeCameraId) {
-      startScanner(activeCameraId);
+  const startScanner = async (deviceOrMode) => {
+    try {
+      if (scannerRef.current) {
+        await stopScanner();
+      }
+      setScanError('');
+      setIsStarting(true);
+      
+      const html5QrCode = new Html5Qrcode("qr-reader");
+      scannerRef.current = html5QrCode;
+
+      // Configurations optimized for speed, low resources, and continuous focus
+      const config = {
+        fps: 25, // Fluid 25 fps
+        qrbox: (width, height) => {
+          const minSize = Math.min(width, height);
+          const size = Math.floor(minSize * 0.72);
+          return { width: size, height: size };
+        },
+        aspectRatio: 1.0,
+        disableFlip: true, // Don't mirror environment camera stream
+        videoConstraints: {
+          facingMode: "environment",
+          focusMode: "continuous",
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      };
+
+      await html5QrCode.start(
+        deviceOrMode,
+        config,
+        (decodedText) => {
+          if (hasScannedRef.current) return;
+          hasScannedRef.current = true;
+          stopScanner();
+          onScanned(decodedText);
+        },
+        (errorMessage) => {
+          // Silently process frame-level decoding errors
+        }
+      );
+
+      setIsScanning(true);
+      setIsStarting(false);
+    } catch (err) {
+      console.error('Error starting QR scanner:', err);
+      // Fallback: if direct facingMode fail, query listing
+      if (deviceOrMode && typeof deviceOrMode === 'object' && deviceOrMode.facingMode) {
+        console.warn('Direct facingMode: environment failed, querying devices...');
+        fallbackToDeviceList();
+      } else {
+        setScanError('Webcam access failed. Verify camera permissions.');
+        setIsScanning(false);
+        setIsStarting(false);
+      }
     }
-  }, [activeCameraId]);
+  };
+
+  const fallbackToDeviceList = async () => {
+    try {
+      const devices = await Html5Qrcode.getCameras();
+      if (devices && devices.length > 0) {
+        setCameras(devices);
+        const backCam = devices.find(d => 
+          d.label.toLowerCase().includes('back') || 
+          d.label.toLowerCase().includes('environment') ||
+          d.label.toLowerCase().includes('rear')
+        );
+        const nextId = backCam ? backCam.id : devices[0].id;
+        setActiveCameraId(nextId);
+        startScanner(nextId);
+      } else {
+        setScanError('No camera devices detected on this system.');
+        setIsScanning(false);
+        setIsStarting(false);
+      }
+    } catch (err) {
+      console.error('Fallback camera detection failed:', err);
+      setScanError('Webcam permission denied or camera not found.');
+      setIsScanning(false);
+      setIsStarting(false);
+    }
+  };
+
+  useEffect(() => {
+    // Start instantly using rear camera facingMode
+    startScanner({ facingMode: "environment" });
+
+    // Load cameras list in background to populate switcher dropdown
+    Html5Qrcode.getCameras()
+      .then((devices) => {
+        if (devices && devices.length > 1) {
+          setCameras(devices);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      stopScanner();
+    };
+  }, []);
+
+  const handleCameraChange = (cameraId) => {
+    setActiveCameraId(cameraId);
+    startScanner(cameraId);
+  };
 
   return (
-    <div className="flex flex-col gap-4 items-center w-full">
+    <div className="flex flex-col gap-4 items-center w-full flex-1 justify-center">
       {scanError && (
-        <div className="bg-red-50 text-red-600 border border-red-200 text-xs p-3 rounded-lg flex items-center gap-2 w-full">
+        <div className="bg-red-950/80 text-red-400 border border-red-900 text-xs p-3 rounded-lg flex items-center gap-2 w-full">
           <AlertTriangle size={15} className="shrink-0" />
           <span>{scanError}</span>
         </div>
       )}
 
+      {/* Viewport Frame */}
+      <div className="relative w-full flex-1 max-h-[360px] sm:max-h-[300px] flex items-center justify-center bg-slate-950 overflow-hidden rounded-xl border border-slate-800">
+        
+        {/* html5-qrcode element */}
+        <div id="qr-reader" className="w-full h-full object-cover [&>video]:object-cover [&>video]:w-full [&>video]:h-full [&>div]:hidden"></div>
+        
+        {/* Starting indicator */}
+        {isStarting && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-950/90 p-4 text-center">
+            <Camera size={32} className="animate-pulse text-brand-accent mb-2" />
+            <p className="text-xs font-semibold">Initializing camera stream...</p>
+          </div>
+        )}
+
+        {/* HUD Scanner Box Overlay */}
+        {isScanning && (
+          <div className="absolute inset-0 pointer-events-none flex flex-col justify-between">
+            {/* Top Mask */}
+            <div className="bg-slate-950/60 flex-1"></div>
+            
+            <div className="flex">
+              {/* Left Mask */}
+              <div className="bg-slate-950/60 flex-1"></div>
+              
+              {/* Hollow Viewport Target */}
+              <div className="relative w-[210px] h-[210px] sm:w-[230px] sm:h-[230px] shrink-0 border border-brand-accent/25 rounded-2xl overflow-hidden shadow-[0_0_80px_rgba(77,166,255,0.12)]">
+                {/* Glowing Corner Accents */}
+                <div className="absolute top-0 left-0 w-6 h-6 border-t-[3.5px] border-l-[3.5px] border-brand-accent rounded-tl-lg"></div>
+                <div className="absolute top-0 right-0 w-6 h-6 border-t-[3.5px] border-r-[3.5px] border-brand-accent rounded-tr-lg"></div>
+                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-[3.5px] border-l-[3.5px] border-brand-accent rounded-bl-lg"></div>
+                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-[3.5px] border-r-[3.5px] border-brand-accent rounded-br-lg"></div>
+                
+                {/* Neon Sweeping Laser Line */}
+                <div className="absolute left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-brand-accent to-transparent shadow-[0_0_10px_#4da6ff] animate-scan-laser"></div>
+              </div>
+              
+              {/* Right Mask */}
+              <div className="bg-slate-950/60 flex-1"></div>
+            </div>
+            
+            {/* Bottom Mask */}
+            <div className="bg-slate-950/60 flex-1 flex flex-col items-center justify-start pt-3">
+              <p className="text-[10px] font-bold text-slate-300 tracking-wider uppercase px-4 text-center">
+                Align QR Code inside square frame
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer controls / switcher */}
       {cameras.length > 1 && (
-        <div className="w-full">
-          <label className="text-[10px] font-bold text-brand-textMuted uppercase block mb-1">Select Viewfinder Device</label>
+        <div className="w-full mt-1 px-2">
           <select
             value={activeCameraId}
-            onChange={(e) => setActiveCameraId(e.target.value)}
-            className="w-full text-xs bg-white border border-brand-border rounded-lg p-2 text-brand-textDark focus:border-brand-accent focus:ring-1 focus:ring-brand-accent outline-none font-semibold"
+            onChange={(e) => handleCameraChange(e.target.value)}
+            className="w-full text-xs bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-300 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent outline-none font-semibold"
           >
             {cameras.map((camera) => (
               <option key={camera.id} value={camera.id}>
@@ -124,20 +277,6 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
           </select>
         </div>
       )}
-
-      <div className="relative w-full aspect-square max-w-[200px] sm:max-w-[240px] bg-slate-900 border border-brand-border rounded-xl overflow-hidden shadow-inner flex items-center justify-center mx-auto">
-        <div id="qr-reader" className="w-full h-full object-cover"></div>
-        {!isScanning && !scanError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-brand-textMuted bg-slate-900/90 p-4 text-center">
-            <Camera size={32} className="animate-pulse text-brand-accent mb-2" />
-            <p className="text-[11px] font-semibold">Starting camera...</p>
-          </div>
-        )}
-      </div>
-      
-      <p className="text-[10px] text-brand-textMuted font-semibold text-center mt-1">
-        Align the receipt QR code in the square frame to scan.
-      </p>
     </div>
   );
 };
@@ -149,14 +288,33 @@ const Dashboard = () => {
 
   // QR Scan States
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
-  const [scannerMode, setScannerMode] = useState('scan'); // 'scan', 'details', 'success'
-  const [scanTab, setScanTab] = useState('camera'); // 'camera', 'manual'
+  const [scannerMode, setScannerMode] = useState('scan'); // 'scan', 'processing', 'details', 'success'
+  const [scanTab, setScanTab] = useState('camera'); // 'camera', 'upload'
   const [manualInput, setManualInput] = useState('');
   const [scannedBooking, setScannedBooking] = useState(null);
   const [lookupError, setLookupError] = useState('');
   const [isSubmittingVerify, setIsSubmittingVerify] = useState(false);
+  const [isContinuousMode, setIsContinuousMode] = useState(true);
+
+  // Timer reference to cancel count-down resets if user closes or re-scans manually
+  const autoResetTimerRef = React.useRef(null);
+  const lastScannedCodeRef = React.useRef({ code: '', time: 0 });
 
   const handleBookingLookup = async (idOrJson) => {
+    // Clear any pending timers
+    if (autoResetTimerRef.current) {
+      clearTimeout(autoResetTimerRef.current);
+    }
+
+    // Anti-double-scan threshold: Ignore scan if same code is read within 4.5 seconds
+    const now = Date.now();
+    const lastScan = lastScannedCodeRef.current;
+    if (lastScan.code === idOrJson.trim() && (now - lastScan.time) < 4500) {
+      console.log('Anti-loop: Ignored duplicate scan of same code');
+      return;
+    }
+    lastScannedCodeRef.current = { code: idOrJson.trim(), time: now };
+
     setLookupError('');
     let bookingId = idOrJson.trim();
 
@@ -173,20 +331,80 @@ const Dashboard = () => {
     }
 
     if (!bookingId) {
+      playErrorSound();
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
       setLookupError('Please enter a valid Booking ID or QR code text.');
       return;
     }
+
+    setScannerMode('processing');
 
     try {
       setLookupError('');
       const response = await axiosInstance.get(`/bookings/lookup/${bookingId}`);
       if (response.data.success) {
-        setScannedBooking(response.data.booking);
-        setScannerMode('details');
+        const booking = response.data.booking;
+        setScannedBooking(booking);
+
+        // If ticket is already verified (expired)
+        if (booking.isVerified) {
+          playErrorSound();
+          if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+          setLookupError(`This ticket was already verified on ${new Date(booking.verifiedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}`);
+          setScannerMode('details');
+          
+          if (isContinuousMode) {
+            autoResetTimerRef.current = setTimeout(() => {
+              setScannerMode('scan');
+              setScannedBooking(null);
+              setLookupError('');
+            }, 3800);
+          }
+          return;
+        }
+
+        // If valid and pending check-in, AUTO-VERIFY instantly!
+        try {
+          const verifyResponse = await axiosInstance.put(`/bookings/verify/${booking._id}`);
+          if (verifyResponse.data.success) {
+            playSuccessSound();
+            if (navigator.vibrate) navigator.vibrate(150);
+            
+            setScannedBooking(verifyResponse.data.booking);
+            setScannerMode('success');
+            
+            // Sync Ledger Metrics
+            fetchAnalytics();
+
+            if (isContinuousMode) {
+              autoResetTimerRef.current = setTimeout(() => {
+                setScannerMode('scan');
+                setScannedBooking(null);
+                setLookupError('');
+              }, 1800);
+            } else {
+              autoResetTimerRef.current = setTimeout(() => {
+                setIsScanModalOpen(false);
+                setScannerMode('scan');
+                setScannedBooking(null);
+                setLookupError('');
+              }, 2200);
+            }
+          }
+        } catch (verifyErr) {
+          console.error('Verify error during auto-submit:', verifyErr);
+          playErrorSound();
+          if (navigator.vibrate) navigator.vibrate([200, 100]);
+          setLookupError(verifyErr.response?.data?.message || 'Error occurred during ticket verification.');
+          setScannerMode('details');
+        }
       }
     } catch (err) {
       console.error('Failed to lookup booking:', err);
+      playErrorSound();
+      if (navigator.vibrate) navigator.vibrate([200, 100]);
       setLookupError(err.response?.data?.message || 'Booking not found with the provided ID.');
+      setScannerMode('scan'); // Stay on scan tab so they can try again
     }
   };
 
@@ -201,7 +419,9 @@ const Dashboard = () => {
       await handleBookingLookup(decodedText);
     } catch (err) {
       console.error('Failed to parse QR code from file:', err);
-      setLookupError('Could not find a valid QR Code in the uploaded image. Please make sure the image is clear and well-lit.');
+      playErrorSound();
+      if (navigator.vibrate) navigator.vibrate([200, 100]);
+      setLookupError('Could not find a valid QR Code in the uploaded image. Make sure it is well-lit.');
     }
   };
 
@@ -212,12 +432,30 @@ const Dashboard = () => {
     try {
       const response = await axiosInstance.put(`/bookings/verify/${scannedBooking._id}`);
       if (response.data.success) {
+        playSuccessSound();
+        if (navigator.vibrate) navigator.vibrate(150);
         setScannerMode('success');
-        // Refresh dashboard metrics
         fetchAnalytics();
+        
+        if (isContinuousMode) {
+          autoResetTimerRef.current = setTimeout(() => {
+            setScannerMode('scan');
+            setScannedBooking(null);
+            setLookupError('');
+          }, 1800);
+        } else {
+          autoResetTimerRef.current = setTimeout(() => {
+            setIsScanModalOpen(false);
+            setScannerMode('scan');
+            setScannedBooking(null);
+            setLookupError('');
+          }, 2200);
+        }
       }
     } catch (err) {
       console.error('Failed to verify booking ticket:', err);
+      playErrorSound();
+      if (navigator.vibrate) navigator.vibrate([200, 100]);
       setLookupError(err.response?.data?.message || 'Error occurred during ticket verification.');
     } finally {
       setIsSubmittingVerify(false);
@@ -238,8 +476,12 @@ const Dashboard = () => {
     }
   };
 
+  // Clean up any pending timer on unmount
   useEffect(() => {
     fetchAnalytics();
+    return () => {
+      if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
+    };
   }, []);
 
   if (loading) {
@@ -484,28 +726,66 @@ const Dashboard = () => {
       {/* QR Code Ticket Verification Modal */}
       {isScanModalOpen && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-brand-textDark/60 backdrop-blur-sm p-0 sm:p-4 animate-fade-in">
-          <div className="bg-white border-0 sm:border border-brand-border/80 w-full sm:max-w-md h-screen sm:h-auto rounded-none sm:rounded-2xl shadow-soft overflow-hidden animate-slide-up flex flex-col max-h-screen sm:max-h-[90vh]">
+          <div className={`border-0 sm:border w-full sm:max-w-md h-screen sm:h-[580px] rounded-none sm:rounded-2xl shadow-soft overflow-hidden animate-slide-up flex flex-col max-h-screen sm:max-h-[90vh] transition-colors duration-300 ${
+            scannerMode === 'scan' || scannerMode === 'processing'
+              ? 'bg-slate-950 text-white border-slate-800' 
+              : 'bg-white text-brand-textDark border-brand-border/85'
+          }`}>
             
             {/* Modal Header */}
-            <div className="border-b border-brand-border/60 p-4 pt-7 sm:p-4 flex items-center justify-between bg-gradient-to-r from-brand-accent/5 to-transparent">
+            <div className={`border-b p-4 pt-7 sm:p-4 flex items-center justify-between transition-colors duration-300 ${
+              scannerMode === 'scan' || scannerMode === 'processing'
+                ? 'border-slate-800 bg-slate-900/40 text-white' 
+                : 'border-brand-border/60 bg-gradient-to-r from-brand-accent/5 to-transparent text-brand-textDark'
+            }`}>
               <div className="flex items-center gap-2">
-                <div className="bg-brand-accent/10 p-2 rounded-lg text-brand-accent">
+                <div className={`p-2 rounded-lg transition-colors duration-300 ${
+                  scannerMode === 'scan' || scannerMode === 'processing' ? 'bg-brand-accent/20 text-brand-accent' : 'bg-brand-accent/10 text-brand-accent'
+                }`}>
                   <QrCode size={18} />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-sm text-brand-textDark tracking-tight">Verify Booking Receipt</h3>
-                  <p className="text-[10px] text-brand-textSecondary mt-0.5">Admin check-in ledger console</p>
+                  <h3 className="font-extrabold text-sm tracking-tight">Verify Booking Receipt</h3>
+                  <p className={`text-[10px] mt-0.5 font-semibold ${scannerMode === 'scan' || scannerMode === 'processing' ? 'text-slate-400' : 'text-brand-textSecondary'}`}>
+                    Admin check-in ledger console
+                  </p>
                 </div>
               </div>
+
+              {/* Continuous Scan Mode Toggle */}
+              {(scannerMode === 'scan' || scannerMode === 'processing') && (
+                <div className="flex items-center gap-2 mr-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider hidden xs:inline">Continuous</span>
+                  <button
+                    onClick={() => setIsContinuousMode(!isContinuousMode)}
+                    className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-300 focus:outline-none relative border ${
+                      isContinuousMode 
+                        ? 'bg-brand-success border-brand-success' 
+                        : 'bg-slate-800 border-slate-700'
+                    }`}
+                  >
+                    <div className={`w-3.5 h-3.5 rounded-full bg-white shadow-md transform transition-transform duration-300 ${
+                      isContinuousMode ? 'translate-x-4' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+              )}
+
               <button
                 onClick={() => {
+                  if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
+                  lastScannedCodeRef.current = { code: '', time: 0 }; // Reset anti-double-scan lock
                   setIsScanModalOpen(false);
                   setScannerMode('scan');
                   setScannedBooking(null);
                   setLookupError('');
                   setManualInput('');
                 }}
-                className="p-1.5 rounded-lg border border-brand-border/60 text-brand-textSecondary hover:text-brand-textDark bg-white hover:bg-brand-light transition-all duration-300"
+                className={`p-1.5 rounded-lg border transition-all duration-300 ${
+                  scannerMode === 'scan' || scannerMode === 'processing'
+                    ? 'border-slate-800 text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-900'
+                    : 'border-brand-border/60 text-brand-textSecondary hover:text-brand-textDark bg-white hover:bg-brand-light'
+                }`}
               >
                 <X size={15} />
               </button>
@@ -516,24 +796,28 @@ const Dashboard = () => {
               
               {/* Display errors */}
               {lookupError && (
-                <div className="bg-red-50 text-red-600 border border-red-200 text-xs p-3 rounded-lg flex items-center gap-2">
+                <div className={`text-xs p-3 rounded-lg flex items-center gap-2 border transition-colors duration-300 ${
+                  scannerMode === 'scan' || scannerMode === 'processing'
+                    ? 'bg-red-950/70 text-red-400 border-red-900'
+                    : 'bg-red-50 text-red-600 border-red-200'
+                }`}>
                   <AlertTriangle size={15} className="shrink-0" />
-                  <span className="font-medium">{lookupError}</span>
+                  <span className="font-semibold">{lookupError}</span>
                 </div>
               )}
 
               {/* Mode 1: SCAN / INPUT */}
               {scannerMode === 'scan' && (
                 <div className="flex-1 flex flex-col gap-3 justify-between overflow-hidden">
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-3 flex-1 justify-center">
                     {/* Tabs */}
-                    <div className="flex bg-brand-light p-1 rounded-lg border border-brand-border/40">
+                    <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
                       <button
                         onClick={() => { setScanTab('camera'); setLookupError(''); }}
                         className={`flex-1 text-center py-1.5 text-xs font-bold rounded-md transition-all duration-300 flex items-center justify-center gap-1.5 ${
                           scanTab === 'camera'
-                            ? 'bg-white text-brand-accent shadow-sm'
-                            : 'text-brand-textSecondary hover:text-brand-textDark'
+                            ? 'bg-slate-800 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-white'
                         }`}
                       >
                         <Camera size={13} /> Camera Viewfinder
@@ -542,8 +826,8 @@ const Dashboard = () => {
                         onClick={() => { setScanTab('upload'); setLookupError(''); }}
                         className={`flex-1 text-center py-1.5 text-xs font-bold rounded-md transition-all duration-300 flex items-center justify-center gap-1.5 ${
                           scanTab === 'upload'
-                            ? 'bg-white text-brand-accent shadow-sm'
-                            : 'text-brand-textSecondary hover:text-brand-textDark'
+                            ? 'bg-slate-800 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-white'
                         }`}
                       >
                         <Upload size={13} /> Upload QR Image
@@ -556,21 +840,21 @@ const Dashboard = () => {
                         onClose={() => setIsScanModalOpen(false)}
                       />
                     ) : (
-                      <div className="flex flex-col gap-3 w-full">
-                        <div className="flex flex-col items-center justify-center border-2 border-dashed border-brand-border hover:border-brand-accent rounded-2xl p-5 bg-brand-light/30 transition-all duration-300 relative group cursor-pointer max-w-[200px] mx-auto w-full">
+                      <div className="flex flex-col gap-3 w-full py-4">
+                        <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-800 hover:border-brand-accent rounded-2xl p-6 bg-slate-900/40 transition-all duration-300 relative group cursor-pointer max-w-[220px] mx-auto w-full">
                           <input
                             type="file"
                             accept="image/*"
                             onChange={handleFileChange}
                             className="absolute inset-0 opacity-0 cursor-pointer z-10"
                           />
-                          <div className="flex flex-col items-center gap-1.5 text-center text-brand-textSecondary group-hover:text-brand-accent transition-all duration-300">
-                            <div className="p-2.5 bg-brand-accent/5 rounded-full border border-brand-border/40 group-hover:border-brand-accent/20 group-hover:bg-brand-accent/10">
-                              <Upload size={18} className="text-brand-textMuted group-hover:text-brand-accent transition-all duration-300" />
+                          <div className="flex flex-col items-center gap-2 text-center group-hover:text-brand-accent transition-all duration-300">
+                            <div className="p-3 rounded-full border bg-slate-800/40 border-slate-700/60 group-hover:border-brand-accent/20 group-hover:bg-brand-accent/10 transition-all duration-300">
+                              <Upload size={18} className="text-slate-400 group-hover:text-brand-accent transition-all duration-300" />
                             </div>
                             <div>
-                              <p className="text-xs font-extrabold text-brand-textDark">Upload QR Image</p>
-                              <p className="text-[9px] text-brand-textMuted font-semibold mt-0.5 leading-relaxed">
+                              <p className="text-xs font-extrabold text-white">Upload QR Image</p>
+                              <p className="text-[9px] text-brand-textMuted font-bold mt-0.5 leading-relaxed">
                                 Choose image file
                               </p>
                             </div>
@@ -585,9 +869,23 @@ const Dashboard = () => {
                 </div>
               )}
 
-              {/* Mode 2: TICKET DETAILS */}
+              {/* Mode 2: PROCESSING (LOOKING UP) */}
+              {scannerMode === 'processing' && (
+                <div className="flex-1 flex flex-col justify-center items-center py-12 text-center gap-4 text-white">
+                  <div className="relative flex items-center justify-center">
+                    <div className="absolute w-12 h-12 rounded-full bg-brand-accent/20 animate-ping" />
+                    <div className="border-[3px] border-slate-800 border-l-brand-accent rounded-full w-12 h-12 animate-spin relative z-10" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm tracking-tight text-white">Verifying Booking Receipt</h4>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">Contacting administrative ledger database...</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Mode 3: TICKET DETAILS */}
               {scannerMode === 'details' && scannedBooking && (
-                <div className="flex-1 flex flex-col gap-3 sm:gap-4 justify-between overflow-hidden">
+                <div className="flex-1 flex flex-col gap-3 sm:gap-4 justify-between overflow-hidden animate-scale-up">
                   <div className="flex flex-col gap-3 sm:gap-4 overflow-hidden">
                     
                     {/* Status Banner */}
@@ -612,7 +910,7 @@ const Dashboard = () => {
                     )}
 
                     {/* Booking Card Grid */}
-                    <div className="bg-brand-light/50 border border-brand-border/60 rounded-xl p-3 sm:p-4 flex flex-col gap-3 overflow-hidden">
+                    <div className="bg-brand-light/50 border border-brand-border/60 rounded-xl p-3 sm:p-4 flex flex-col gap-3 overflow-hidden shadow-sm">
                       
                       <div className="flex items-center justify-between border-b border-brand-border/40 pb-2">
                         <span className="text-[10px] font-bold text-brand-textMuted uppercase">Booking Identifier</span>
@@ -675,80 +973,122 @@ const Dashboard = () => {
                   </div>
 
                   {/* Actions */}
-                  <div className="flex gap-3 mt-auto pt-3 border-t border-brand-border/40">
-                    <button
-                      onClick={() => {
-                        setScannerMode('scan');
-                        setScannedBooking(null);
-                        setLookupError('');
-                      }}
-                      className="flex-1 border border-brand-border hover:bg-brand-light text-brand-textSecondary hover:text-brand-textDark font-extrabold py-2.5 px-4 rounded-xl text-xs transition-all duration-300"
-                    >
-                      Scan Another
-                    </button>
-                    {!scannedBooking.isVerified && (
+                  <div className="flex flex-col gap-2 mt-auto pt-3 border-t border-brand-border/40">
+                    <div className="flex gap-3 w-full animate-fade-in">
                       <button
-                        onClick={handleVerifyTicket}
-                        disabled={isSubmittingVerify}
-                        className="flex-1 bg-brand-accent hover:bg-brand-accent/90 disabled:opacity-50 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all duration-300 shadow-soft hover:shadow-premium"
+                        onClick={() => {
+                          if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
+                          lastScannedCodeRef.current = { code: '', time: 0 }; // Reset anti-double-scan lock
+                          setScannerMode('scan');
+                          setScannedBooking(null);
+                          setLookupError('');
+                        }}
+                        className="flex-1 border border-brand-border hover:bg-brand-light text-brand-textSecondary hover:text-brand-textDark font-extrabold py-2.5 px-4 rounded-xl text-xs transition-all duration-300 shadow-sm"
                       >
-                        {isSubmittingVerify ? (
-                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <CheckCircle2 size={13} />
-                        )}
-                        Verify Ticket
+                        Scan Another
                       </button>
+                      {!scannedBooking.isVerified && (
+                        <button
+                          onClick={handleVerifyTicket}
+                          disabled={isSubmittingVerify}
+                          className="flex-1 bg-brand-accent hover:bg-brand-accentHover disabled:opacity-50 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all duration-300 shadow-soft hover:shadow-premium"
+                        >
+                          {isSubmittingVerify ? (
+                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <CheckCircle2 size={13} />
+                          )}
+                          Verify Ticket
+                        </button>
+                      )}
+                    </div>
+
+                    {isContinuousMode && scannedBooking.isVerified && (
+                      <div className="w-full">
+                        <div className="w-full bg-slate-100 border border-slate-200 h-1.5 rounded-full overflow-hidden mt-1 relative">
+                          <div 
+                            className="h-full bg-brand-danger rounded-full animate-countdown"
+                            style={{ animationDuration: '3.8s' }}
+                          />
+                        </div>
+                        <p className="text-[9px] text-brand-textMuted font-bold text-center mt-1 uppercase tracking-wide">
+                          Resuming scanner in 3.8s...
+                        </p>
+                      </div>
                     )}
                   </div>
-
                 </div>
               )}
 
-              {/* Mode 3: SUCCESS */}
+              {/* Mode 4: SUCCESS */}
               {scannerMode === 'success' && (
-                <div className="flex-1 flex flex-col justify-between items-center py-6 text-center gap-4 animate-scale-up overflow-hidden">
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-16 h-16 rounded-full bg-green-50 border border-green-200 flex items-center justify-center text-green-500 shadow-soft animate-pulse">
-                      <CheckCircle2 size={36} />
+                <div className="flex-1 flex flex-col justify-between items-center py-4 text-center gap-4 animate-scale-up overflow-hidden">
+                  <div className="flex flex-col items-center gap-3.5 w-full">
+                    {/* Glowing Checkmark */}
+                    <div className="w-14 h-14 rounded-full bg-green-50 border border-green-200 flex items-center justify-center text-brand-success shadow-soft animate-pulse shrink-0">
+                      <CheckCircle2 size={32} />
                     </div>
                     
                     <div>
-                      <h4 className="font-extrabold text-brand-textDark text-base tracking-tight">Ticket Verified Successfully!</h4>
-                      <p className="text-[11px] text-brand-textSecondary mt-1 leading-relaxed max-w-[260px] mx-auto font-semibold">
+                      <h4 className="font-extrabold text-brand-textDark text-sm tracking-tight">Ticket Verified Successfully!</h4>
+                      <p className="text-[10px] text-brand-textSecondary mt-0.5 leading-relaxed font-semibold max-w-[260px] mx-auto">
                         Player check-in logged. The slot allocation is confirmed and receipt verified.
                       </p>
                     </div>
 
                     {scannedBooking && (
-                      <div className="w-full bg-brand-light border border-brand-border/40 rounded-xl p-3 text-xs font-bold text-brand-textSecondary flex flex-col gap-1 max-w-[280px]">
-                        <div className="flex justify-between">
+                      <div className="w-full bg-brand-light/70 border border-brand-border/40 rounded-xl p-3 text-xxs font-bold text-brand-textSecondary flex flex-col gap-2 max-w-[320px] mx-auto text-left shadow-sm">
+                        <div className="flex justify-between border-b border-brand-border/30 pb-1.5">
+                          <span>Booking ID:</span>
+                          <span className="text-brand-textDark font-black">{scannedBooking.bookingId}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-brand-border/30 pb-1.5">
                           <span>Player:</span>
-                          <span className="text-brand-textDark">{scannedBooking.customerName}</span>
+                          <span className="text-brand-textDark font-black">{scannedBooking.customerName}</span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex justify-between border-b border-brand-border/30 pb-1.5">
+                          <span>Turf:</span>
+                          <span className="text-brand-textDark font-black">{scannedBooking.turf?.name || 'Main Arena'}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-brand-border/30 pb-1.5">
                           <span>Slot Timing:</span>
-                          <span className="text-brand-textDark">{scannedBooking.slot}</span>
+                          <span className="text-brand-textDark font-black">{scannedBooking.slot}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>Date:</span>
-                          <span className="text-brand-textDark">{scannedBooking.date}</span>
+                          <span>Paid:</span>
+                          <span className="text-brand-success font-black">₹{scannedBooking.finalAmount}</span>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setScannerMode('scan');
-                      setScannedBooking(null);
-                      setLookupError('');
-                      setManualInput('');
-                    }}
-                    className="w-full max-w-[200px] bg-brand-accent hover:bg-brand-accent/90 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all duration-300 shadow-soft hover:shadow-premium mt-auto"
-                  >
-                    Scan Next Ticket
-                  </button>
+                  {/* Manual Override & Progress Timer */}
+                  <div className="w-full max-w-[320px] mx-auto">
+                    <button
+                      onClick={() => {
+                        if (autoResetTimerRef.current) clearTimeout(autoResetTimerRef.current);
+                        lastScannedCodeRef.current = { code: '', time: 0 }; // Reset anti-double-scan lock
+                        setScannerMode('scan');
+                        setScannedBooking(null);
+                        setLookupError('');
+                        setManualInput('');
+                      }}
+                      className="w-full bg-brand-accent hover:bg-brand-accentHover text-white font-extrabold py-2 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all duration-300 shadow-soft hover:shadow-premium"
+                    >
+                      Scan Next Ticket
+                    </button>
+
+                    {/* Progress Countdown Bar */}
+                    <div className="w-full bg-brand-light border border-brand-border/20 h-1.5 rounded-full overflow-hidden mt-3.5 relative">
+                      <div 
+                        className="h-full bg-brand-success rounded-full animate-countdown"
+                        style={{ animationDuration: isContinuousMode ? '1.8s' : '2.2s' }}
+                      />
+                    </div>
+                    <p className="text-[9px] text-brand-textMuted font-bold text-center mt-1.5 uppercase tracking-wider">
+                      {isContinuousMode ? 'Resuming camera in 1.8s...' : 'Closing window in 2.2s...'}
+                    </p>
+                  </div>
                 </div>
               )}
 

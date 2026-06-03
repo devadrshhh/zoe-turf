@@ -140,7 +140,8 @@ const getDashboardAnalytics = async (req, res, next) => {
     const recentBookings = await Booking.find()
       .populate('turf', 'name location sportType')
       .sort({ createdAt: -1 })
-      .limit(5);
+      .limit(5)
+      .lean();
 
     res.status(200).json({
       success: true,
