@@ -86,59 +86,47 @@ const choosePrimaryBackCamera = (devices) => {
     console.warn('Failed to read preferred camera label from localStorage:', e);
   }
 
-  // Filter for rear/back/environment cameras
-  const backCams = devices.filter(d => {
+  // Filter out definitely invalid cameras (front, selfie, macro)
+  const candidates = devices.filter(d => {
     const label = d.label.toLowerCase();
-    return label.includes('back') || label.includes('environment') || label.includes('rear');
+    return !label.includes('front') && 
+           !label.includes('selfie') && 
+           !label.includes('macro');
   });
 
-  const candidates = backCams.length > 0 ? backCams : devices;
+  const searchList = candidates.length > 0 ? candidates : devices;
 
-  if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0];
+  if (searchList.length === 0) return null;
+  if (searchList.length === 1) return searchList[0];
 
-  // Filter out known wide, ultra, tele, zoom, depth, virtual, 0.5x-0.8x, and "camera 0" / "cam 0"
-  // (Since camera 0 is typically the ultra-wide lens on Samsung S20 FE and similar devices)
-  const filtered = candidates.filter(d => {
-    const label = d.label.toLowerCase();
-    return !label.includes('ultra') && 
-           !label.includes('wide') && 
-           !label.includes('tele') && 
-           !label.includes('zoom') && 
-           !label.includes('virtual') &&
-           !label.includes('depth') &&
-           !label.includes('0.5x') &&
-           !label.includes('0.6x') &&
-           !label.includes('0.7x') &&
-           !label.includes('0.8x') &&
-           !label.includes('camera 0') &&
-           !label.includes('cam 0');
+  // Score each remaining camera candidate
+  const scored = searchList.map(device => {
+    const label = device.label.toLowerCase();
+    let score = 0;
+
+    // Prefer labels containing: main, back, wide, 1x
+    if (label.includes('main')) score += 10;
+    if (label.includes('1x')) score += 10;
+    if (label.includes('wide') && !label.includes('ultra')) score += 8; // wide (but not ultra-wide) is the standard lens
+    if (label.includes('back') || label.includes('rear') || label.includes('environment')) score += 5;
+
+    // Samsung S20 FE specific generic index handling
+    if (label.includes('camera 1')) score += 9; // Camera 1 is standard
+    if (label.includes('camera 2')) score += 4; // Camera 2 is telephoto/zoom
+    
+    // Avoid labels containing: ultra, tele, zoom, virtual, depth, 0.5, camera 0, cam 0
+    if (label.includes('ultra') || label.includes('0.5') || label.includes('0.6')) score -= 15;
+    if (label.includes('camera 0') || label.includes('cam 0')) score -= 15; // Camera 0 on S20 FE is ultra-wide
+    if (label.includes('tele') || label.includes('zoom')) score -= 5;
+    if (label.includes('depth') || label.includes('virtual')) score -= 8;
+
+    return { device, score };
   });
 
-  // If we have filtered candidates, search within them for best matches
-  const searchList = filtered.length > 0 ? filtered : candidates;
+  // Sort by score descending
+  scored.sort((a, b) => b.score - a.score);
 
-  // 1st Priority: Explicit main, primary, standard, 1x, camera 1, cam 1
-  const mainCam = searchList.find(d => {
-    const label = d.label.toLowerCase();
-    return label.includes('main') || 
-           label.includes('primary') || 
-           label.includes('standard') || 
-           label.includes('1x') || 
-           label.includes('camera 1') || 
-           label.includes('cam 1');
-  });
-  if (mainCam) return mainCam;
-
-  // 2nd Priority: Look for camera 2 / cam 2 (telephoto/zoom is better than ultrawide if no main)
-  const secondaryCam = searchList.find(d => {
-    const label = d.label.toLowerCase();
-    return label.includes('camera 2') || label.includes('cam 2');
-  });
-  if (secondaryCam) return secondaryCam;
-
-  // 3rd Priority: Default to first candidate in the searchList
-  return searchList[0];
+  return scored[0].device;
 };
 
 // Helper to generate clear, descriptive camera names for the drawer selection
@@ -221,7 +209,7 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
             height: { ideal: 480 }
           }
         : {
-            facingMode: "environment",
+            facingMode: { ideal: "environment" },
             focusMode: "continuous",
             width: { ideal: 640 },
             height: { ideal: 480 }
@@ -241,7 +229,7 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
       };
 
       await html5QrCode.start(
-        isStringId ? deviceOrMode : { facingMode: "environment" },
+        isStringId ? deviceOrMode : { facingMode: { ideal: "environment" } },
         config,
         (decodedText) => {
           if (hasScannedRef.current) return;
@@ -354,11 +342,11 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
             await startScanner(devices[0].id);
           }
         } else {
-          await startScanner({ facingMode: "environment" });
+          await startScanner({ facingMode: { ideal: "environment" } });
         }
       } catch (err) {
         console.warn('Webcam devices list query failed, falling back to standard facingMode:', err);
-        await startScanner({ facingMode: "environment" });
+        await startScanner({ facingMode: { ideal: "environment" } });
       }
     };
 
