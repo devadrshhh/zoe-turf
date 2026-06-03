@@ -158,6 +158,120 @@ const sendReceiptEmail = async (booking, turfName) => {
   }
 };
 
+/**
+ * Sends a high-fidelity check-in verification email directly to the customer's email ID.
+ * @param {Object} booking - The Mongoose booking record document
+ * @param {String} turfName - The human-readable name of the reserved sports turf
+ * @returns {Promise<Boolean>} Success status
+ */
+const sendVerificationEmail = async (booking, turfName) => {
+  try {
+    if (!booking.customerEmail) {
+      console.warn(`⚠️ Mailing Warning: Missing customerEmail on booking ${booking.bookingId} verification mail. Skipping.`);
+      return false;
+    }
+
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) {
+      console.warn('⚠️ Mailing Warning: BREVO_API_KEY is not configured inside backend/.env. Verification email will be bypassed.');
+      return false;
+    }
+
+    // High fidelity responsive HTML verification ticket check-in receipt
+    const htmlText = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);">
+          <!-- Top Accent Header Gradient (Green for Verified Success) -->
+          <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 24px; text-align: center; color: #ffffff;">
+            <!-- Verified Circle Badge -->
+            <div style="background: rgba(255, 255, 255, 0.2); width: 56px; height: 56px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin: 0 auto 12px auto; border: 2px solid #ffffff;">
+              <span style="font-size: 28px; font-weight: bold; line-height: 56px;">✓</span>
+            </div>
+            <h2 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;">Ticket Verified</h2>
+            <p style="margin: 6px 0 0 0; font-size: 12px; opacity: 0.9; font-weight: 500;">Checked in successfully at Turf Hub</p>
+          </div>
+
+          <!-- Body details -->
+          <div style="padding: 24px; background: #ffffff; color: #0f172a;">
+            
+            <div style="text-align: center; margin-bottom: 24px; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 12px;">
+              <p style="margin: 0; font-size: 14px; font-weight: 800; color: #166534; text-transform: uppercase; letter-spacing: 0.5px;">✓ Gate Pass Verified</p>
+              <p style="margin: 4px 0 0 0; font-size: 11px; color: #15803d; font-weight: 600;">Check-in: ${new Date(booking.verifiedAt || Date.now()).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+            </div>
+
+            <!-- Summary Table -->
+            <h3 style="font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin: 0 0 12px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px;">Check-In Summary</h3>
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 8px 0; color: #64748b; font-weight: 500;">Booking Reference</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 700; color: #0f172a;">${booking.bookingId}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 8px 0; color: #64748b; font-weight: 500;">Player Name</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 700; color: #0f172a;">${booking.customerName}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 8px 0; color: #64748b; font-weight: 500;">Player Phone</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 600; color: #334155;">${booking.customerPhone}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 8px 0; color: #64748b; font-weight: 500;">Turf Arena</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 700; color: #059669;">${turfName}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 8px 0; color: #64748b; font-weight: 500;">Timing Date</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 700; color: #0f172a;">${booking.date}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b; font-weight: 500;">Timing Hour</td>
+                <td style="padding: 8px 0; text-align: right; font-weight: 800; color: #059669; font-size: 13px;">${booking.slot}</td>
+              </tr>
+            </table>
+
+          </div>
+
+          <!-- Bottom Footer -->
+          <div style="background: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 10px; color: #64748b; line-height: 1.5;">
+            <p style="margin: 0; font-weight: 600;">Thank you for playing at Turf Hub!</p>
+            <p style="margin: 4px 0 0 0;">Have a great game. Make sure to review us after your session.</p>
+          </div>
+        </div>
+      `;
+
+    console.log(`⚡ Sending check-in verification email to user ${booking.customerEmail}...`);
+    const senderEmail = process.env.EMAIL_USER || 'learn.microx@gmail.com';
+    
+    const bodyPayload = {
+      sender: { name: 'Turf Hub', email: senderEmail },
+      to: [{ email: booking.customerEmail, name: booking.customerName }],
+      subject: `✅ Check-in Verified! Booking ID: ${booking.bookingId}`,
+      htmlContent: htmlText
+    };
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': apiKey,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(bodyPayload)
+    });
+
+    if (response.ok) {
+      console.log(`🚀 Verification email successfully sent to ${booking.customerEmail}`);
+      return true;
+    } else {
+      const errText = await response.text();
+      console.error('❌ Brevo API verification email dispatch failed:', errText);
+      return false;
+    }
+  } catch (err) {
+    console.error(`⚠️ Mailing Error: Failed to send verification check-in email to ${booking.customerEmail}. Detail:`, err.message);
+    return false;
+  }
+};
+
 module.exports = {
   sendReceiptEmail,
+  sendVerificationEmail,
 };

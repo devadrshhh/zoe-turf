@@ -4,7 +4,7 @@ const Coupon = require('../models/Coupon');
 const Payment = require('../models/Payment');
 const QRCode = require('qrcode');
 const ExcelJS = require('exceljs');
-const { sendReceiptEmail } = require('../utils/mailer');
+const { sendReceiptEmail, sendVerificationEmail } = require('../utils/mailer');
 
 // Operating Slot definitions (Hourly slots)
 const OPERATING_SLOTS = [
@@ -725,6 +725,13 @@ const verifyBookingTicket = async (req, res, next) => {
     booking.isVerified = true;
     booking.verifiedAt = new Date();
     await booking.save();
+
+    // Fetch booking with turf populated to get the name for the check-in email
+    const populatedBooking = await Booking.findById(booking._id).populate('turf', 'name');
+    const turfName = populatedBooking && populatedBooking.turf ? populatedBooking.turf.name : 'Main Turf Arena';
+
+    // Trigger verification check-in email dispatch asynchronously to notify customer
+    sendVerificationEmail(booking, turfName);
 
     res.status(200).json({
       success: true,
