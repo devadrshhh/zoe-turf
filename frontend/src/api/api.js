@@ -10,10 +10,15 @@ import axios from 'axios';
 
 const getBaseUrl = () => {
   const isProd = import.meta.env.PROD;
-  const defaultUrl = isProd ? window.location.origin : 'http://localhost:5000';
-  const url = import.meta.env.VITE_API_URL || defaultUrl;
-  // Ensure the base URL always ends with '/api' for backend route mapping
-  return url.endsWith('/api') ? url : `${url.replace(/\/$/, '')}/api`;
+  if (isProd) {
+    const url = import.meta.env.VITE_API_URL || window.location.origin;
+    return url.endsWith('/api') ? url : `${url.replace(/\/$/, '')}/api`;
+  }
+  
+  // Local development: construct URL using the current browser hostname to support multi-device local testing (PC & Mobile)
+  const hostname = window.location.hostname || 'localhost';
+  const url = `http://${hostname}:5000`;
+  return `${url}/api`;
 };
 
 export const API_BASE_URL = getBaseUrl();
