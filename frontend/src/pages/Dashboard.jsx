@@ -75,16 +75,31 @@ const playErrorSound = () => {
 
 // Helper to find the primary 1x back camera (ignoring ultra-wide or zoom lenses)
 const choosePrimaryBackCamera = (devices) => {
+  // 0. Stored preference check
+  try {
+    const preferredLabel = localStorage.getItem('admin_preferred_camera_label');
+    if (preferredLabel) {
+      const preferredCam = devices.find(d => d.label === preferredLabel);
+      if (preferredCam) return preferredCam;
+    }
+  } catch (e) {
+    console.warn('Failed to read preferred camera label from localStorage:', e);
+  }
+
   // Filter for rear/back/environment cameras
   const backCams = devices.filter(d => {
     const label = d.label.toLowerCase();
     return label.includes('back') || label.includes('environment') || label.includes('rear');
   });
 
-  if (backCams.length === 0) return null;
+  const candidates = backCams.length > 0 ? backCams : devices;
 
-  // 1st Priority: Standard rear camera avoiding wide, ultra, tele, zoom, 0.5x, 0.6x, depth, etc.
-  const primaryCam = backCams.find(d => {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  // Filter out known wide, ultra, tele, zoom, depth, virtual, 0.5x-0.8x, and "camera 0" / "cam 0"
+  // (Since camera 0 is typically the ultra-wide lens on Samsung S20 FE and similar devices)
+  const filtered = candidates.filter(d => {
     const label = d.label.toLowerCase();
     return !label.includes('ultra') && 
            !label.includes('wide') && 
@@ -93,19 +108,37 @@ const choosePrimaryBackCamera = (devices) => {
            !label.includes('virtual') &&
            !label.includes('depth') &&
            !label.includes('0.5x') &&
-           !label.includes('0.6x');
+           !label.includes('0.6x') &&
+           !label.includes('0.7x') &&
+           !label.includes('0.8x') &&
+           !label.includes('camera 0') &&
+           !label.includes('cam 0');
   });
-  if (primaryCam) return primaryCam;
 
-  // 2nd Priority: Look for main, primary, 1x, or camera 0
-  const mainCam = backCams.find(d => {
+  // If we have filtered candidates, search within them for best matches
+  const searchList = filtered.length > 0 ? filtered : candidates;
+
+  // 1st Priority: Explicit main, primary, standard, 1x, camera 1, cam 1
+  const mainCam = searchList.find(d => {
     const label = d.label.toLowerCase();
-    return label.includes('main') || label.includes('primary') || label.includes('1x') || label.includes('camera 0');
+    return label.includes('main') || 
+           label.includes('primary') || 
+           label.includes('standard') || 
+           label.includes('1x') || 
+           label.includes('camera 1') || 
+           label.includes('cam 1');
   });
   if (mainCam) return mainCam;
 
-  // 3rd Priority: Default to first available back camera
-  return backCams[0];
+  // 2nd Priority: Look for camera 2 / cam 2 (telephoto/zoom is better than ultrawide if no main)
+  const secondaryCam = searchList.find(d => {
+    const label = d.label.toLowerCase();
+    return label.includes('camera 2') || label.includes('cam 2');
+  });
+  if (secondaryCam) return secondaryCam;
+
+  // 3rd Priority: Default to first candidate in the searchList
+  return searchList[0];
 };
 
 // QR Viewfinder component using html5-qrcode
@@ -182,46 +215,46 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
       setIsScanning(true);
       setIsStarting(false);
 
-      // Post-start self-correction check (only when initialized blindly via facingMode)
-      if (deviceOrMode && typeof deviceOrMode === 'object' && deviceOrMode.facingMode) {
-        if (!hasCorrectedRef.current) {
-          hasCorrectedRef.current = true;
-          try {
-            const devices = await Html5Qrcode.getCameras();
-            if (devices && devices.length > 1) {
-              setCameras(devices);
-              
-              const videoElement = document.querySelector('#qr-reader video');
-              if (videoElement && videoElement.srcObject) {
-                const tracks = videoElement.srcObject.getVideoTracks();
-                if (tracks.length > 0) {
-                  const activeTrack = tracks[0];
-                  const activeLabel = activeTrack.label.toLowerCase();
-                  
-                  // Check if the current running camera is wide/ultra-wide or zoom
-                  const isWrongCamera = activeLabel.includes('ultra') || 
-                                        activeLabel.includes('wide') || 
-                                        activeLabel.includes('zoom') || 
-                                        activeLabel.includes('0.5x') || 
-                                        activeLabel.includes('0.6x') ||
-                                        activeLabel.includes('0.7x') ||
-                                        activeLabel.includes('0.8x');
-                                        
-                  if (isWrongCamera) {
-                    const primaryBackCam = choosePrimaryBackCamera(devices);
-                    if (primaryBackCam && primaryBackCam.label.toLowerCase() !== activeLabel) {
-                      console.log(`Self-correcting camera: active track "${activeTrack.label}" is ultrawide/zoom. Switching to primary: "${primaryBackCam.label}"`);
-                      await html5QrCode.stop();
-                      setActiveCameraId(primaryBackCam.id);
-                      await startScanner(primaryBackCam.id);
-                    }
+      // Post-start self-correction check (runs on first camera initialization to bypass wrong default lens selection)
+      if (!hasCorrectedRef.current) {
+        hasCorrectedRef.current = true;
+        try {
+          const devices = await Html5Qrcode.getCameras();
+          if (devices && devices.length > 1) {
+            setCameras(devices);
+            
+            const videoElement = document.querySelector('#qr-reader video');
+            if (videoElement && videoElement.srcObject) {
+              const tracks = videoElement.srcObject.getVideoTracks();
+              if (tracks.length > 0) {
+                const activeTrack = tracks[0];
+                const activeLabel = activeTrack.label.toLowerCase();
+                
+                // Check if the current running camera is wide/ultra-wide, zoom, or camera 0
+                const isWrongCamera = activeLabel.includes('ultra') || 
+                                      activeLabel.includes('wide') || 
+                                      activeLabel.includes('zoom') || 
+                                      activeLabel.includes('0.5x') || 
+                                      activeLabel.includes('0.6x') ||
+                                      activeLabel.includes('0.7x') ||
+                                      activeLabel.includes('0.8x') ||
+                                      activeLabel.includes('camera 0') ||
+                                      activeLabel.includes('cam 0');
+                                      
+                if (isWrongCamera) {
+                  const primaryBackCam = choosePrimaryBackCamera(devices);
+                  if (primaryBackCam && primaryBackCam.label.toLowerCase() !== activeLabel) {
+                    console.log(`Self-correcting camera: active track "${activeTrack.label}" is ultrawide/zoom/camera 0. Switching to primary: "${primaryBackCam.label}"`);
+                    await html5QrCode.stop();
+                    setActiveCameraId(primaryBackCam.id);
+                    await startScanner(primaryBackCam.id);
                   }
                 }
               }
             }
-          } catch (err) {
-            console.warn('Post-start camera self-correction check failed:', err);
           }
+        } catch (err) {
+          console.warn('Post-start camera self-correction check failed:', err);
         }
       }
     } catch (err) {
@@ -296,6 +329,18 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
 
   const handleCameraChange = (cameraId) => {
     setActiveCameraId(cameraId);
+    
+    // Save selected camera friendly label to localStorage to persist user selection
+    const selectedCam = cameras.find(c => c.id === cameraId);
+    if (selectedCam && selectedCam.label) {
+      try {
+        localStorage.setItem('admin_preferred_camera_label', selectedCam.label);
+        console.log(`Persisted preferred camera label: ${selectedCam.label}`);
+      } catch (err) {
+        console.warn('Failed to save preferred camera to localStorage:', err);
+      }
+    }
+    
     startScanner(cameraId);
   };
 
