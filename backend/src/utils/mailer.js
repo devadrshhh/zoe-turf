@@ -96,12 +96,32 @@ const sendReceiptEmail = async (booking, turfName) => {
     console.log('⚡ Sending receipt email via Brevo HTTP REST API (Port 443)...');
     const senderEmail = process.env.EMAIL_USER || 'learn.microx@gmail.com';
     
+    // Query active administrators to BCC them on the booking receipt
+    let adminBcc = [];
+    try {
+      const Admin = require('../models/Admin');
+      const activeAdmins = await Admin.find({ isActive: true }, 'email name');
+      if (activeAdmins && activeAdmins.length > 0) {
+        adminBcc = activeAdmins.map(admin => ({
+          email: admin.email,
+          name: admin.name || 'Admin'
+        }));
+      }
+    } catch (dbErr) {
+      console.warn('⚠️ Mailing Warning: Could not retrieve active admin emails for BCC copy:', dbErr.message);
+    }
+
     const bodyPayload = {
       sender: { name: 'Turf Hub', email: senderEmail },
       to: [{ email: booking.customerEmail, name: booking.customerName }],
       subject: `⚡ Booking Confirmed! Ticket ID: ${booking.bookingId}`,
       htmlContent: htmlText
     };
+
+    if (adminBcc.length > 0) {
+      bodyPayload.bcc = adminBcc;
+      console.log(`✉️ Adding BCC copy for ${adminBcc.length} active administrators.`);
+    }
 
     if (booking.qrCodeData) {
       const base64Content = booking.qrCodeData.split(',')[1];

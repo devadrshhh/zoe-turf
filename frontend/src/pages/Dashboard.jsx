@@ -141,9 +141,41 @@ const choosePrimaryBackCamera = (devices) => {
   return searchList[0];
 };
 
+// Helper to generate clear, descriptive camera names for the drawer selection
+const getFriendlyCameraName = (label, index) => {
+  const cleanLabel = label ? label.toLowerCase() : '';
+  
+  let facing = 'Back/Rear';
+  if (cleanLabel.includes('front') || cleanLabel.includes('user') || cleanLabel.includes('selfie')) {
+    facing = 'Front';
+  }
+
+  let lens = 'Standard Lens (1x)';
+  if (cleanLabel.includes('ultra') || cleanLabel.includes('wide') || cleanLabel.includes('0.5x') || cleanLabel.includes('0.6x') || cleanLabel.includes('0.7x')) {
+    lens = 'Ultra-wide Lens (0.5x)';
+  } else if (cleanLabel.includes('tele') || cleanLabel.includes('zoom') || cleanLabel.includes('3x') || cleanLabel.includes('2x')) {
+    lens = 'Telephoto Zoom Lens';
+  } else if (cleanLabel.includes('depth') || cleanLabel.includes('tof')) {
+    lens = 'Depth Sensor / Portrait Lens';
+  } else if (cleanLabel.includes('camera 0')) {
+    // Samsung S20 FE specific
+    lens = 'Ultra-wide Lens (Camera 0)';
+  } else if (cleanLabel.includes('camera 1')) {
+    lens = 'Main Standard Lens (Camera 1)';
+  } else if (cleanLabel.includes('camera 2')) {
+    lens = 'Zoom/Telephoto Lens (Camera 2)';
+  }
+
+  return {
+    label: label || `Camera ${index + 1}`,
+    friendly: `${facing} — ${lens}`
+  };
+};
+
 // QR Viewfinder component using html5-qrcode
 const QrCameraScanner = ({ onScanned, onClose }) => {
   const [cameras, setCameras] = useState([]);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [activeCameraId, setActiveCameraId] = useState('');
   const [scanError, setScanError] = useState('');
   const [isScanning, setIsScanning] = useState(false);
@@ -345,7 +377,7 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
   };
 
   return (
-    <div className="flex flex-col gap-4 items-center w-full flex-1 justify-center">
+    <div className="flex flex-col gap-4 items-center w-full flex-1 justify-center relative">
       {scanError && (
         <div className="bg-red-950/80 text-red-400 border border-red-900 text-xs p-3 rounded-lg flex items-center gap-2 w-full">
           <AlertTriangle size={15} className="shrink-0" />
@@ -403,20 +435,83 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
         )}
       </div>
 
-      {/* Footer controls / switcher */}
+      {/* Footer controls / switcher button */}
       {cameras.length > 1 && (
         <div className="w-full mt-1 px-2">
-          <select
-            value={activeCameraId}
-            onChange={(e) => handleCameraChange(e.target.value)}
-            className="w-full text-xs bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-300 focus:border-brand-accent focus:ring-1 focus:ring-brand-accent outline-none font-semibold"
+          <button
+            onClick={() => setIsDrawerOpen(true)}
+            className="w-full text-xs bg-slate-900 border border-slate-800 hover:border-brand-accent hover:text-white rounded-lg p-2.5 text-slate-300 flex items-center justify-between font-bold transition-all duration-300 shadow-sm"
           >
-            {cameras.map((camera) => (
-              <option key={camera.id} value={camera.id}>
-                {camera.label || `Camera ${camera.id}`}
-              </option>
-            ))}
-          </select>
+            <span className="flex items-center gap-1.5">
+              <Camera size={13} className="text-brand-accent animate-pulse" />
+              Lens: <span className="text-slate-100 font-semibold">{
+                (() => {
+                  const activeCamObj = cameras.find(c => c.id === activeCameraId);
+                  const activeIdx = cameras.findIndex(c => c.id === activeCameraId);
+                  return activeCamObj ? getFriendlyCameraName(activeCamObj.label, activeIdx).friendly : 'Detecting Lens...';
+                })()
+              }</span>
+            </span>
+            <span className="text-[10px] text-brand-accent font-extrabold uppercase tracking-wider bg-brand-accent/15 px-2 py-0.5 rounded border border-brand-accent/20">
+              Switch
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* Camera Choice Drawer Sheet */}
+      {isDrawerOpen && (
+        <div className="absolute inset-0 z-30 bg-slate-950/75 backdrop-blur-sm flex flex-col justify-end rounded-xl overflow-hidden animate-fade-in">
+          {/* Backdrop Clicker to Close */}
+          <div className="flex-1" onClick={() => setIsDrawerOpen(false)}></div>
+          
+          {/* Drawer Panel */}
+          <div className="bg-slate-900 border-t border-slate-800 p-4 pb-6 flex flex-col gap-3 max-h-[85%] overflow-y-auto rounded-t-2xl shadow-2xl animate-slide-up">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2 text-white">
+                <Camera size={15} className="text-brand-accent" />
+                <span className="text-xs font-bold uppercase tracking-wider">Choose Camera Lens</span>
+              </div>
+              <button
+                onClick={() => setIsDrawerOpen(false)}
+                className="text-slate-400 hover:text-white p-1 transition-colors"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            
+            <div className="flex flex-col gap-2 mt-1">
+              {cameras.map((camera, index) => {
+                const nameInfo = getFriendlyCameraName(camera.label, index);
+                const isActive = camera.id === activeCameraId;
+                
+                return (
+                  <button
+                    key={camera.id}
+                    onClick={() => {
+                      handleCameraChange(camera.id);
+                      setIsDrawerOpen(false);
+                    }}
+                    className={`w-full text-left p-3 rounded-xl border flex items-center justify-between transition-all duration-300 ${
+                      isActive 
+                        ? 'bg-brand-accent/15 border-brand-accent text-white font-extrabold shadow-[0_0_15px_rgba(77,166,255,0.08)]' 
+                        : 'bg-slate-950/30 border-slate-800/80 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold">{nameInfo.friendly}</span>
+                      <span className="text-[9px] text-slate-500 font-semibold mt-0.5">{nameInfo.label}</span>
+                    </div>
+                    {isActive && (
+                      <div className="w-5 h-5 rounded-full bg-brand-accent flex items-center justify-center text-white shadow">
+                        <CheckCircle2 size={12} className="stroke-[3]" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>
