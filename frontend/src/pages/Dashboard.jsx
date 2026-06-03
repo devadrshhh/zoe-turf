@@ -212,6 +212,21 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
         }
       }
 
+      const isStringId = typeof deviceOrMode === 'string';
+      const videoConstraints = isStringId
+        ? {
+            deviceId: { exact: deviceOrMode },
+            focusMode: "continuous",
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        : {
+            facingMode: "environment",
+            focusMode: "continuous",
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          };
+
       // Configurations optimized for speed, low resources, and continuous focus
       const config = {
         fps: 25, // Fluid 25 fps
@@ -222,16 +237,11 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
         },
         aspectRatio: 1.0,
         disableFlip: true, // Don't mirror environment camera stream
-        videoConstraints: {
-          facingMode: "environment",
-          focusMode: "continuous",
-          width: { ideal: 640 },
-          height: { ideal: 480 }
-        }
+        videoConstraints
       };
 
       await html5QrCode.start(
-        deviceOrMode,
+        isStringId ? deviceOrMode : { facingMode: "environment" },
         config,
         (decodedText) => {
           if (hasScannedRef.current) return;
