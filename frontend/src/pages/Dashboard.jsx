@@ -73,6 +73,41 @@ const playErrorSound = () => {
   }
 };
 
+// Helper to find the primary 1x back camera (ignoring ultra-wide or zoom lenses)
+const choosePrimaryBackCamera = (devices) => {
+  // Filter for rear/back/environment cameras
+  const backCams = devices.filter(d => {
+    const label = d.label.toLowerCase();
+    return label.includes('back') || label.includes('environment') || label.includes('rear');
+  });
+
+  if (backCams.length === 0) return null;
+
+  // 1st Priority: Standard rear camera avoiding wide, ultra, tele, zoom, 0.5x, 0.6x, depth, etc.
+  const primaryCam = backCams.find(d => {
+    const label = d.label.toLowerCase();
+    return !label.includes('ultra') && 
+           !label.includes('wide') && 
+           !label.includes('tele') && 
+           !label.includes('zoom') && 
+           !label.includes('virtual') &&
+           !label.includes('depth') &&
+           !label.includes('0.5x') &&
+           !label.includes('0.6x');
+  });
+  if (primaryCam) return primaryCam;
+
+  // 2nd Priority: Look for main, primary, 1x, or camera 0
+  const mainCam = backCams.find(d => {
+    const label = d.label.toLowerCase();
+    return label.includes('main') || label.includes('primary') || label.includes('1x') || label.includes('camera 0');
+  });
+  if (mainCam) return mainCam;
+
+  // 3rd Priority: Default to first available back camera
+  return backCams[0];
+};
+
 // QR Viewfinder component using html5-qrcode
 const QrCameraScanner = ({ onScanned, onClose }) => {
   const [cameras, setCameras] = useState([]);
@@ -158,11 +193,7 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
       const devices = await Html5Qrcode.getCameras();
       if (devices && devices.length > 0) {
         setCameras(devices);
-        const backCam = devices.find(d => 
-          d.label.toLowerCase().includes('back') || 
-          d.label.toLowerCase().includes('environment') ||
-          d.label.toLowerCase().includes('rear')
-        );
+        const backCam = choosePrimaryBackCamera(devices);
         const nextId = backCam ? backCam.id : devices[0].id;
         setActiveCameraId(nextId);
         startScanner(nextId);
@@ -180,17 +211,33 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
   };
 
   useEffect(() => {
-    // Start instantly using rear camera facingMode
-    startScanner({ facingMode: "environment" });
-
-    // Load cameras list in background to populate switcher dropdown
-    Html5Qrcode.getCameras()
-      .then((devices) => {
-        if (devices && devices.length > 1) {
+    const initializeCamera = async () => {
+      try {
+        setScanError('');
+        setIsStarting(true);
+        
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
           setCameras(devices);
+          
+          const primaryBackCam = choosePrimaryBackCamera(devices);
+          if (primaryBackCam) {
+            setActiveCameraId(primaryBackCam.id);
+            await startScanner(primaryBackCam.id);
+          } else {
+            setActiveCameraId(devices[0].id);
+            await startScanner(devices[0].id);
+          }
+        } else {
+          await startScanner({ facingMode: "environment" });
         }
-      })
-      .catch(() => {});
+      } catch (err) {
+        console.warn('Webcam devices list query failed, falling back to standard facingMode:', err);
+        await startScanner({ facingMode: "environment" });
+      }
+    };
+
+    initializeCamera();
 
     return () => {
       stopScanner();
