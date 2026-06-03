@@ -131,14 +131,20 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
 
   const startScanner = async (deviceOrMode) => {
     try {
-      if (scannerRef.current) {
-        await stopScanner();
-      }
       setScanError('');
       setIsStarting(true);
       
-      const html5QrCode = new Html5Qrcode("qr-reader");
-      scannerRef.current = html5QrCode;
+      let html5QrCode = scannerRef.current;
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode("qr-reader");
+        scannerRef.current = html5QrCode;
+      } else if (html5QrCode.isScanning) {
+        try {
+          await html5QrCode.stop();
+        } catch (err) {
+          console.warn('Failed to stop active scanner before restarting:', err);
+        }
+      }
 
       // Configurations optimized for speed, low resources, and continuous focus
       const config = {
