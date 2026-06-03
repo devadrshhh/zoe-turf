@@ -174,6 +174,34 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
 
       setIsScanning(true);
       setIsStarting(false);
+
+      // Post-start self-correction check (only when initialized blindly via facingMode)
+      if (deviceOrMode && typeof deviceOrMode === 'object' && deviceOrMode.facingMode) {
+        try {
+          const devices = await Html5Qrcode.getCameras();
+          if (devices && devices.length > 1) {
+            setCameras(devices);
+            
+            const videoElement = document.querySelector('#qr-reader video');
+            if (videoElement && videoElement.srcObject) {
+              const tracks = videoElement.srcObject.getVideoTracks();
+              if (tracks.length > 0) {
+                const activeDeviceId = tracks[0].getSettings().deviceId;
+                const primaryBackCam = choosePrimaryBackCamera(devices);
+                
+                if (primaryBackCam && primaryBackCam.id !== activeDeviceId) {
+                  console.log(`Self-correcting camera: switching from active track ${activeDeviceId} to primary 1x camera ${primaryBackCam.id}`);
+                  await html5QrCode.stop();
+                  setActiveCameraId(primaryBackCam.id);
+                  await startScanner(primaryBackCam.id);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Post-start camera self-correction check failed:', err);
+        }
+      }
     } catch (err) {
       console.error('Error starting QR scanner:', err);
       // Fallback: if direct facingMode fail, query listing
