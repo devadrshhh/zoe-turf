@@ -117,6 +117,7 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
   const [isStarting, setIsStarting] = useState(true);
   const scannerRef = React.useRef(null);
   const hasScannedRef = React.useRef(false);
+  const hasCorrectedRef = React.useRef(false);
 
   const stopScanner = async () => {
     if (scannerRef.current && scannerRef.current.isScanning) {
@@ -183,29 +184,44 @@ const QrCameraScanner = ({ onScanned, onClose }) => {
 
       // Post-start self-correction check (only when initialized blindly via facingMode)
       if (deviceOrMode && typeof deviceOrMode === 'object' && deviceOrMode.facingMode) {
-        try {
-          const devices = await Html5Qrcode.getCameras();
-          if (devices && devices.length > 1) {
-            setCameras(devices);
-            
-            const videoElement = document.querySelector('#qr-reader video');
-            if (videoElement && videoElement.srcObject) {
-              const tracks = videoElement.srcObject.getVideoTracks();
-              if (tracks.length > 0) {
-                const activeDeviceId = tracks[0].getSettings().deviceId;
-                const primaryBackCam = choosePrimaryBackCamera(devices);
-                
-                if (primaryBackCam && primaryBackCam.id !== activeDeviceId) {
-                  console.log(`Self-correcting camera: switching from active track ${activeDeviceId} to primary 1x camera ${primaryBackCam.id}`);
-                  await html5QrCode.stop();
-                  setActiveCameraId(primaryBackCam.id);
-                  await startScanner(primaryBackCam.id);
+        if (!hasCorrectedRef.current) {
+          hasCorrectedRef.current = true;
+          try {
+            const devices = await Html5Qrcode.getCameras();
+            if (devices && devices.length > 1) {
+              setCameras(devices);
+              
+              const videoElement = document.querySelector('#qr-reader video');
+              if (videoElement && videoElement.srcObject) {
+                const tracks = videoElement.srcObject.getVideoTracks();
+                if (tracks.length > 0) {
+                  const activeTrack = tracks[0];
+                  const activeLabel = activeTrack.label.toLowerCase();
+                  
+                  // Check if the current running camera is wide/ultra-wide or zoom
+                  const isWrongCamera = activeLabel.includes('ultra') || 
+                                        activeLabel.includes('wide') || 
+                                        activeLabel.includes('zoom') || 
+                                        activeLabel.includes('0.5x') || 
+                                        activeLabel.includes('0.6x') ||
+                                        activeLabel.includes('0.7x') ||
+                                        activeLabel.includes('0.8x');
+                                        
+                  if (isWrongCamera) {
+                    const primaryBackCam = choosePrimaryBackCamera(devices);
+                    if (primaryBackCam && primaryBackCam.label.toLowerCase() !== activeLabel) {
+                      console.log(`Self-correcting camera: active track "${activeTrack.label}" is ultrawide/zoom. Switching to primary: "${primaryBackCam.label}"`);
+                      await html5QrCode.stop();
+                      setActiveCameraId(primaryBackCam.id);
+                      await startScanner(primaryBackCam.id);
+                    }
+                  }
                 }
               }
             }
+          } catch (err) {
+            console.warn('Post-start camera self-correction check failed:', err);
           }
-        } catch (err) {
-          console.warn('Post-start camera self-correction check failed:', err);
         }
       }
     } catch (err) {
