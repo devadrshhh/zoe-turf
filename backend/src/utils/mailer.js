@@ -195,7 +195,7 @@ const sendVerificationEmail = async (booking, turfName) => {
             
             <div style="text-align: center; margin-bottom: 24px; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 12px;">
               <p style="margin: 0; font-size: 14px; font-weight: 800; color: #166534; text-transform: uppercase; letter-spacing: 0.5px;">✓ Gate Pass Verified</p>
-              <p style="margin: 4px 0 0 0; font-size: 11px; color: #15803d; font-weight: 600;">Check-in: ${new Date(booking.verifiedAt || Date.now()).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+              <p style="margin: 4px 0 0 0; font-size: 11px; color: #15803d; font-weight: 600;">Check-in: ${new Date(booking.verifiedAt || Date.now()).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}</p>
             </div>
 
             <!-- Summary Table -->
