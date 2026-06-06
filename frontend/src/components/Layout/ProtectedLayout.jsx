@@ -19,7 +19,8 @@ import {
   ChevronDown,
   DollarSign,
   Download,
-  Settings
+  Settings,
+  Clock
 } from 'lucide-react';
 
 const ProtectedLayout = () => {
@@ -48,6 +49,7 @@ const ProtectedLayout = () => {
   const navItems = [
     { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { label: 'Bookings', path: '/admin/bookings', icon: CalendarDays },
+    { label: 'Pending', path: '/admin/pending-payments', icon: Clock },
     { label: 'Payments', path: '/admin/payments', icon: CreditCard },
     { label: 'Coupons', path: '/admin/coupons', icon: Ticket },
     { label: 'Settings', path: '/admin/set-payment', icon: Settings },

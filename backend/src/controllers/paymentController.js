@@ -76,6 +76,7 @@ const verifyPayment = async (req, res, next) => {
     if (isMock) {
       // Complete mock payment flow successfully
       booking.paymentStatus = 'Paid';
+      booking.status = 'Confirmed';
       booking.razorpayPaymentId = razorpay_payment_id || `pay_mock_${Date.now()}`;
       booking.razorpayOrderId = razorpay_order_id;
       
@@ -120,6 +121,7 @@ const verifyPayment = async (req, res, next) => {
 
     if (generated_signature === razorpay_signature) {
       booking.paymentStatus = 'Paid';
+      booking.status = 'Confirmed';
       booking.razorpayPaymentId = razorpay_payment_id;
       booking.razorpayOrderId = razorpay_order_id;
 

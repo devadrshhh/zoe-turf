@@ -12,6 +12,7 @@ const Payments = lazy(() => import('./pages/Payments'));
 const Coupons = lazy(() => import('./pages/Coupons'));
 const AdminManagement = lazy(() => import('./pages/AdminManagement'));
 const SetPayment = lazy(() => import('./pages/SetPayment'));
+const PendingPayments = lazy(() => import('./pages/PendingPayments'));
 
 // Simple lightweight loading fallback
 const PageLoader = () => (
@@ -36,13 +37,14 @@ function App() {
             <Route path="/admin/login" element={<Login />} />
 
             {/* Secure Administrative panel nested under /admin namespace */}
-            <Route element={<ProtectedLayout />}>
-              <Route path="/admin/dashboard" element={<Dashboard />} />
-              <Route path="/admin/bookings" element={<Bookings />} />
-              <Route path="/admin/payments" element={<Payments />} />
-              <Route path="/admin/set-payment" element={<SetPayment />} />
-              <Route path="/admin/coupons" element={<Coupons />} />
-              <Route path="/admin/admins" element={<AdminManagement />} />
+              <Route element={<ProtectedLayout />}>
+                <Route path="/admin/dashboard" element={<Dashboard />} />
+                <Route path="/admin/bookings" element={<Bookings />} />
+                <Route path="/admin/pending-payments" element={<PendingPayments />} />
+                <Route path="/admin/payments" element={<Payments />} />
+                <Route path="/admin/set-payment" element={<SetPayment />} />
+                <Route path="/admin/coupons" element={<Coupons />} />
+                <Route path="/admin/admins" element={<AdminManagement />} />
               
               {/* Fallback root redirects for namespace /admin */}
               <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />

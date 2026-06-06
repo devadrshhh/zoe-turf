@@ -57,6 +57,9 @@ const getBookings = async (req, res, next) => {
     // Apply filters
     if (paymentStatus) {
       query.paymentStatus = paymentStatus;
+    } else {
+      // By default, exclude bookings with Pending payments
+      query.paymentStatus = { $ne: 'Pending' };
     }
     if (status) {
       query.status = status;
@@ -313,6 +316,7 @@ const createBooking = async (req, res, next) => {
       }
 
       bookingData.razorpayOrderId = razorpayOrderId;
+      bookingData.status = 'Pending';
       const newBooking = await Booking.create(bookingData);
 
       return res.status(201).json({
@@ -509,6 +513,7 @@ const exportBookings = async (req, res, next) => {
 
     } else {
       // Export Bookings (default)
+      query.paymentStatus = { $ne: 'Pending' };
       const bookings = await Booking.find(query)
         .populate('turf', 'name location pricePerHour')
         .sort({ createdAt: -1 })
@@ -654,6 +659,7 @@ const markBookingAsPaid = async (req, res, next) => {
     }
 
     booking.paymentStatus = 'Paid';
+    booking.status = 'Confirmed';
     
     // Generate secure base64 QR Code Receipt
     booking.qrCodeData = await generateReceiptQR({

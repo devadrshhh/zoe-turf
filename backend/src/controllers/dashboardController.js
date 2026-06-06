@@ -27,11 +27,11 @@ const getDashboardAnalytics = async (req, res, next) => {
     const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
 
     // 2. Total Confirmed Bookings count
-    const totalBookings = await Booking.countDocuments({ status: 'Confirmed' });
+    const totalBookings = await Booking.countDocuments({ status: 'Confirmed', paymentStatus: { $ne: 'Pending' } });
 
     // Today Confirmed Bookings count (timezone immune local calculation)
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const todayBookings = await Booking.countDocuments({ date: todayStr, status: 'Confirmed' });
+    const todayBookings = await Booking.countDocuments({ date: todayStr, status: 'Confirmed', paymentStatus: { $ne: 'Pending' } });
 
     // 3. Active Coupons count
     const activeCoupons = await Coupon.countDocuments({
@@ -101,6 +101,7 @@ const getDashboardAnalytics = async (req, res, next) => {
       {
         $match: {
           status: 'Confirmed',
+          paymentStatus: { $ne: 'Pending' },
         },
       },
       {
@@ -137,7 +138,7 @@ const getDashboardAnalytics = async (req, res, next) => {
     }
 
     // Recent Bookings (Last 5)
-    const recentBookings = await Booking.find()
+    const recentBookings = await Booking.find({ paymentStatus: { $ne: 'Pending' } })
       .populate('turf', 'name location sportType')
       .sort({ createdAt: -1 })
       .limit(5)
