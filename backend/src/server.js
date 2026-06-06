@@ -15,6 +15,8 @@ const errorHandler = require('./middlewares/errorMiddleware');
 const Admin = require('./models/Admin');
 const Turf = require('./models/Turf');
 const Coupon = require('./models/Coupon');
+const Booking = require('./models/Booking');
+const { setCache } = require('./utils/cache');
 
 // Route Imports
 const adminRoutes = require('./routes/adminRoutes');
@@ -123,6 +125,20 @@ const startServer = async () => {
       console.log(`Email: ${seedEmail}`);
       console.log(`Password: ${seedPassword}`);
       console.log(`--------------------------------------------------`);
+    }
+
+    // 3. Database connection & cache pre-warming
+    try {
+      console.log('⚡ Pre-warming database connections and cache pools...');
+      const activeTurfs = await Turf.find({ isActive: true }).sort({ createdAt: -1 }).lean();
+      setCache('public_turfs', activeTurfs, 300); // Cache for 5 minutes
+      console.log(`✅ Cache pre-warm: Cached ${activeTurfs.length} active turfs successfully.`);
+
+      const bookingsCount = await Booking.countDocuments();
+      const couponsCount = await Coupon.countDocuments();
+      console.log(`✅ Connection Pool: Warmed sockets for Bookings (${bookingsCount}) and Coupons (${couponsCount}).`);
+    } catch (warmupErr) {
+      console.warn('⚠️ Warmup Warning: Failed to pre-warm database cache on startup:', warmupErr.message);
     }
 
     // Start listening
