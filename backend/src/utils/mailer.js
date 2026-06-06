@@ -13,6 +13,9 @@
  */
 const sendReceiptEmail = async (booking, turfName) => {
   try {
+    // Asynchronously dispatch admin SMS notifications
+    sendBookingSMSNotification(booking, turfName).catch(err => console.error('SMS notification error:', err));
+
     if (!booking.customerEmail) {
       console.warn(`⚠️ Mailing Warning: Missing customerEmail on booking ${booking.bookingId}. Skipping email send.`);
       return false;
@@ -271,7 +274,83 @@ const sendVerificationEmail = async (booking, turfName) => {
   }
 };
 
+/**
+ * Sends a transactional SMS notification directly to active administrators with configured phone numbers.
+ * @param {Object} booking - The Mongoose booking record document
+ * @param {String} turfName - The human-readable name of the reserved sports turf
+ * @returns {Promise<Boolean>} Success status
+ */
+const sendBookingSMSNotification = async (booking, turfName) => {
+  try {
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) {
+      console.warn('⚠️ SMS Warning: BREVO_API_KEY is not configured. Automated admin SMS bypass.');
+      return false;
+    }
+
+    // 1. Fetch active administrators with configured phone numbers
+    const Admin = require('../models/Admin');
+    const admins = await Admin.find({ isActive: true, phone: { $exists: true, $ne: '' } }, 'phone name');
+    
+    if (!admins || admins.length === 0) {
+      console.log('✉️ SMS Info: No active administrators with phone numbers configured. Skipping SMS.');
+      return false;
+    }
+
+    // 2. Format message details
+    const content = `⚡ New Booking Confirmed!\nID: ${booking.bookingId}\nPlayer: ${booking.customerName} (${booking.customerPhone})\nTurf: ${turfName}\nSlot: ${booking.date} (${booking.slot})\nAmount: ₹${booking.finalAmount}`;
+
+    console.log(`⚡ Dispatching booking SMS to ${admins.length} administrators...`);
+    
+    let allSuccess = true;
+
+    // Send to each admin phone number
+    for (const admin of admins) {
+      try {
+        // Strip out non-numeric characters, except optional plus prefix
+        const cleanRecipient = admin.phone.replace(/[^\d+]/g, '');
+        
+        if (!cleanRecipient || cleanRecipient.length < 6) {
+          console.warn(`⚠️ SMS Warning: Invalid phone format for admin ${admin.name}: "${admin.phone}"`);
+          continue;
+        }
+
+        const response = await fetch('https://api.brevo.com/v3/transactionalSMS/send', {
+          method: 'POST',
+          headers: {
+            'accept': 'application/json',
+            'api-key': apiKey,
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({
+            sender: 'TurfHub',
+            recipient: cleanRecipient,
+            content: content
+          })
+        });
+
+        if (response.ok) {
+          console.log(`🚀 SMS notification successfully sent to admin ${admin.name} (${cleanRecipient})`);
+        } else {
+          const errText = await response.text();
+          console.error(`❌ Brevo SMS API error for recipient ${cleanRecipient}:`, errText);
+          allSuccess = false;
+        }
+      } catch (adminErr) {
+        console.error(`⚠️ SMS Error for admin ${admin.name} (${admin.phone}):`, adminErr.message);
+        allSuccess = false;
+      }
+    }
+
+    return allSuccess;
+  } catch (err) {
+    console.error('⚠️ SMS Dispatch Error:', err.message);
+    return false;
+  }
+};
+
 module.exports = {
   sendReceiptEmail,
   sendVerificationEmail,
+  sendBookingSMSNotification,
 };

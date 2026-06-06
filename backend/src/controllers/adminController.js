@@ -69,6 +69,7 @@ const login = async (req, res, next) => {
         id: admin._id,
         name: admin.name,
         email: admin.email,
+        phone: admin.phone,
         role: admin.role,
         lastLogin: admin.lastLogin,
         createdAt: admin.createdAt,
@@ -118,7 +119,7 @@ const getMe = async (req, res, next) => {
 // @access  Private (Super Admin Only)
 const createAdmin = async (req, res, next) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, phone } = req.body;
 
     // Check if email already exists
     const adminExists = await Admin.findOne({ email });
@@ -135,6 +136,7 @@ const createAdmin = async (req, res, next) => {
       email,
       password,
       role,
+      phone,
     });
 
     res.status(201).json({
@@ -144,6 +146,7 @@ const createAdmin = async (req, res, next) => {
         id: newAdmin._id,
         name: newAdmin.name,
         email: newAdmin.email,
+        phone: newAdmin.phone,
         role: newAdmin.role,
         isActive: newAdmin.isActive,
         createdAt: newAdmin.createdAt,
@@ -159,7 +162,7 @@ const createAdmin = async (req, res, next) => {
 // @access  Private (Super Admin Only)
 const updateAdmin = async (req, res, next) => {
   try {
-    const { name, email, role, isActive } = req.body;
+    const { name, email, role, isActive, phone } = req.body;
     const adminId = req.params.id;
 
     let admin = await Admin.findById(adminId);
@@ -189,6 +192,9 @@ const updateAdmin = async (req, res, next) => {
     admin.name = name || admin.name;
     admin.email = email || admin.email;
     admin.role = role || admin.role;
+    if (phone !== undefined) {
+      admin.phone = phone;
+    }
     if (isActive !== undefined) {
       admin.isActive = isActive;
     }
@@ -202,6 +208,7 @@ const updateAdmin = async (req, res, next) => {
         id: updatedAdmin._id,
         name: updatedAdmin.name,
         email: updatedAdmin.email,
+        phone: updatedAdmin.phone,
         role: updatedAdmin.role,
         isActive: updatedAdmin.isActive,
         updatedAt: updatedAdmin.updatedAt,

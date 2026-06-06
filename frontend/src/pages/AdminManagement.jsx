@@ -30,12 +30,14 @@ const AdminManagement = () => {
   // Form Fields: Add Admin
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [role, setRole] = useState('admin');
   const [password, setPassword] = useState('');
 
   // Form Fields: Edit Admin
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
   const [editRole, setEditRole] = useState('admin');
   const [editIsActive, setEditIsActive] = useState(true);
 
@@ -89,12 +91,13 @@ const AdminManagement = () => {
     }
 
     try {
-      const response = await axiosInstance.post('/admin/create', { name, email, password, role });
+      const response = await axiosInstance.post('/admin/create', { name, email, password, role, phone });
       if (response.data.success) {
         triggerToast('New administrative account seeded!');
         setAddModalOpen(false);
         setName('');
         setEmail('');
+        setPhone('');
         setPassword('');
         setRole('admin');
         await fetchAdmins();
@@ -122,6 +125,7 @@ const AdminManagement = () => {
       const response = await axiosInstance.put(`/admin/update/${selectedAdmin._id}`, {
         name: editName,
         email: editEmail,
+        phone: editPhone,
         role: editRole,
         isActive: editIsActive,
       });
@@ -246,6 +250,7 @@ const AdminManagement = () => {
                       <div className="flex flex-col">
                         <span className="text-xs font-black text-brand-textDark">{u.name}</span>
                         <span className="text-[10px] text-brand-textSecondary mt-0.5">{u.email}</span>
+                        {u.phone && <span className="text-[9px] text-brand-accent font-extrabold mt-0.5">📞 {u.phone}</span>}
                       </div>
                       <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase border ${
                         u.isActive
@@ -311,6 +316,7 @@ const AdminManagement = () => {
                               setSelectedAdmin(u);
                               setEditName(u.name);
                               setEditEmail(u.email);
+                              setEditPhone(u.phone || '');
                               setEditRole(u.role);
                               setEditIsActive(u.isActive);
                               setEditModalOpen(true);
@@ -345,6 +351,7 @@ const AdminManagement = () => {
                   <tr>
                     <th className="px-5 py-3 text-left font-bold text-brand-textSecondary uppercase tracking-wider text-[10px]">Staff Name</th>
                     <th className="px-5 py-3 text-left font-bold text-brand-textSecondary uppercase tracking-wider text-[10px]">Email Address</th>
+                    <th className="px-5 py-3 text-left font-bold text-brand-textSecondary uppercase tracking-wider text-[10px]">Contact Number</th>
                     <th className="px-5 py-3 text-left font-bold text-brand-textSecondary uppercase tracking-wider text-[10px]">Security Scope</th>
                     <th className="px-5 py-3 text-left font-bold text-brand-textSecondary uppercase tracking-wider text-[10px]">Active State</th>
                     <th className="px-5 py-3 text-left font-bold text-brand-textSecondary uppercase tracking-wider text-[10px]">Created Date</th>
@@ -357,6 +364,7 @@ const AdminManagement = () => {
                     <tr key={u._id} className="hover:bg-brand-light/30 transition-all duration-300">
                       <td className="px-5 py-3.5 font-bold text-brand-textDark whitespace-nowrap">{u.name}</td>
                       <td className="px-5 py-3.5 whitespace-nowrap text-brand-textSecondary">{u.email}</td>
+                      <td className="px-5 py-3.5 whitespace-nowrap text-brand-textSecondary font-semibold">{u.phone || <span className="text-brand-textMuted italic font-normal">Not configured</span>}</td>
                       <td className="px-5 py-3.5 whitespace-nowrap">
                         <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
                           u.role === 'superadmin'
@@ -411,6 +419,7 @@ const AdminManagement = () => {
                                   setSelectedAdmin(u);
                                   setEditName(u.name);
                                   setEditEmail(u.email);
+                                  setEditPhone(u.phone || '');
                                   setEditRole(u.role);
                                   setEditIsActive(u.isActive);
                                   setEditModalOpen(true);
@@ -488,6 +497,17 @@ const AdminManagement = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">Contact Number (with Country Code)</label>
+                <input
+                  type="text"
+                  className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 px-3 text-xs outline-none transition-all duration-300 focus:border-brand-accent"
+                  placeholder="E.g., 919876543210 (required for SMS)"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
                 />
               </div>
 
@@ -576,6 +596,17 @@ const AdminManagement = () => {
                   value={editEmail}
                   onChange={(e) => setEditEmail(e.target.value)}
                   required
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xxs font-bold text-brand-textSecondary uppercase tracking-wider">Contact Number (with Country Code)</label>
+                <input
+                  type="text"
+                  className="w-full bg-brand-light/35 border border-brand-border rounded-lg py-2.5 px-3 text-xs outline-none transition-all duration-300 focus:border-brand-accent"
+                  placeholder="E.g., 919876543210"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
                 />
               </div>
 
