@@ -115,11 +115,12 @@ const getSlotsAvailable = async (req, res, next) => {
       });
     }
 
-    // Find all bookings for this turf on the given date that are not cancelled
+    // Find all bookings for this turf on the given date that are confirmed and paid
     const activeBookings = await Booking.find({
       turf: turfId,
       date,
       status: 'Confirmed',
+      paymentStatus: 'Paid',
     }).select('slot').lean();
 
     const bookedSlots = activeBookings.map((b) => b.slot);
@@ -178,12 +179,13 @@ const createBooking = async (req, res, next) => {
       });
     }
 
-    // Check if slot is already booked
+    // Check if slot is already booked and paid
     const slotExists = await Booking.findOne({
       turf: turfId,
       date,
       slot,
       status: 'Confirmed',
+      paymentStatus: 'Paid',
     }).select('_id').lean();
 
     if (slotExists) {
@@ -630,6 +632,24 @@ const markBookingAsPaid = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'Booking is already paid',
+      });
+    }
+
+    // Check if slot has already been booked and paid for by another user
+    const alreadyBooked = await Booking.findOne({
+      turf: booking.turf ? (booking.turf._id || booking.turf) : null,
+      date: booking.date,
+      slot: booking.slot,
+      status: 'Confirmed',
+      paymentStatus: 'Paid',
+      _id: { $ne: booking._id }
+    });
+
+    if (alreadyBooked) {
+      return res.status(400).json({
+        success: false,
+        message: 'This slot has already been booked and paid for by another user.',
+        alreadyBooked: true
       });
     }
 

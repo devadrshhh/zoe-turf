@@ -52,6 +52,24 @@ const verifyPayment = async (req, res, next) => {
       });
     }
 
+    // Check if slot has already been booked and paid for by another user
+    const alreadyBooked = await Booking.findOne({
+      turf: booking.turf._id,
+      date: booking.date,
+      slot: booking.slot,
+      status: 'Confirmed',
+      paymentStatus: 'Paid',
+      _id: { $ne: booking._id }
+    });
+
+    if (alreadyBooked) {
+      return res.status(400).json({
+        success: false,
+        message: 'This slot has already been booked and paid for by another user.',
+        alreadyBooked: true
+      });
+    }
+
     // 1. Check if order is simulated (starts with 'order_sandbox_') OR real keys not set
     const isMock = razorpay_order_id.startsWith('order_sandbox_') || !process.env.RAZORPAY_KEY_SECRET;
 
